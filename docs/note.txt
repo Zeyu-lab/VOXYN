@@ -1,0 +1,89 @@
+# VOXYN Dashboard Update Note
+
+## Current Checkpoint
+
+The VOXYN project is moving from a simple authentication demo toward a real product-style dashboard.
+
+Current working state:
+
+* Supabase Auth MVP is working.
+* Users can sign up and sign in through Supabase.
+* After login, users can access the Dashboard.
+* Dashboard can read the current Supabase session and display the logged-in email.
+* Sign out flow exists.
+* Supabase `rooms` table has been created.
+* Row Level Security is enabled for the `rooms` table.
+* Basic policies were added so authenticated users can view rooms and create their own rooms.
+* `RoomView.vue` exists as the early room page placeholder.
+* Dashboard and RoomView are still in early MVP stage.
+
+## Dashboard Direction
+
+The Dashboard should not stay as a simple login-success page.
+
+The intended direction is a real admin/product dashboard layout, similar to the reference image the user provided.
+
+Main layout idea:
+
+* Left sidebar navigation
+* Topbar with user/account area
+* Metric/status cards
+* Main content panels
+* Room management area
+* Right-side or bottom expansion area for future features
+
+## Future Dashboard Sections
+
+The Dashboard should leave space for future VOXYN features, including:
+
+* Rooms
+* Users
+* Chat
+* Voice
+* Mini Games
+* Profile
+* Settings
+* Server Status
+* Payment / Premium features
+
+## Current Core Product Flow
+
+The next important VOXYN product flow is:
+
+1. User logs in.
+2. User enters Dashboard.
+3. User creates a room.
+4. System generates a room code.
+5. User can share the room code.
+6. Another user can join by entering the room code.
+7. Both users enter `/room/:roomCode`.
+
+This flow is more important than visual polish right now because it turns VOXYN from an auth demo into an actual usable product prototype.
+
+## Next Technical Steps
+
+Recommended next steps:
+
+1. Keep the current Supabase Auth setup stable.
+2. Keep `.env` inside `frontend/.env`.
+3. Make sure `.env` is ignored by Git.
+4. Finish Create Room and Join Room by Code in Dashboard.
+5. Make `/room/:roomCode` route work correctly.
+6. Improve `RoomView.vue` into a real room interface.
+7. Later add online users, realtime chat, voice-room style UI, and mini games.
+
+## Design Principle
+
+Build a rough but working version first.
+
+Do not over-polish too early.
+
+The priority is:
+
+Working structure → core room flow → usable room page → realtime features → visual polish.
+
+## Saved Direction
+
+Pause dashboard refinement for now.
+
+When returning to VOXYN Dashboard later, continue from this checkpoint and redesign the dashboard toward a real expandable product/admin dashboard, not a simple centered card page.
