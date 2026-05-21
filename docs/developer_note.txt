@@ -214,3 +214,11 @@ The current checkpoint is:
 ## Next Major Goal
 
 Connect the frontend to the backend health API, then upload the stable project structure to GitHub.
+
+VOXYN v0.3
+Dashboard UI rebuilt:
+- fixed full-size sidebar layout
+- restored blue/white dashboard style
+- added create/join room panel
+- added max members 5/8/10
+- added recent rooms / room blueprint / server access sections
