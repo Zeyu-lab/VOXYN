@@ -342,7 +342,7 @@ async function handleAvatarUpload(event) {
 
     const user = data.user
     const metadata = user.user_metadata || {}
-
+    const oldAvatarPath = metadata.avatar_path || ""
     const filePath = `${user.id}/avatar.${fileExt}`
 
     const { error: uploadError } = await supabase.storage
@@ -356,6 +356,18 @@ async function handleAvatarUpload(event) {
     if (uploadError) {
       throw uploadError
     }
+    if (oldAvatarPath && oldAvatarPath !== filePath) {
+        const { error: removeError } = await supabase.storage
+            .from("avatars")
+            .remove([oldAvatarPath])
+
+        if (removeError) {
+            console.warn("Old avatar remove failed:", removeError)
+        }
+    }
+
+avatarUrl.value = publicUrl
+avatarUpdatedAt.value = updatedAt
 
     const { data: publicUrlData } = supabase.storage
       .from("avatars")

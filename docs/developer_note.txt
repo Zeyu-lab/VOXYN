@@ -21,3 +21,5 @@ Updates:
 - Synced uploaded avatar back to the Dashboard topbar profile circle.
 - Added fallback initial display if avatar image fails to load.
 
+VOXYN v0.311 Update
+- Delete old avatar path replace with new without cost extra memory
