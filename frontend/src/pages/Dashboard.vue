@@ -27,6 +27,9 @@ const user = ref(null)
 const userEmail = ref("")
 const loading = ref(true)
 
+const profileAvatarUrl = ref("")
+const profileAvatarUpdatedAt = ref("")
+const avatarLoadFailed = ref(false)
 /* =========================================================
    SECTION 4: Room Form State
    Purpose:
@@ -104,6 +107,29 @@ const latestRoomCode = computed(() => {
   if (!recentRooms.value.length) return "None"
   return recentRooms.value[0].room_code
 })
+/* =========================================================
+   SECTION 6.5: Profile Avatar Display
+   Purpose:
+   - Show uploaded avatar in Dashboard topbar
+   - Fall back to first email letter
+========================================================= */
+const profileInitial = computed(() => {
+  if (userEmail.value) {
+    return userEmail.value.charAt(0).toUpperCase()
+  }
+
+  return "U"
+})
+
+const dashboardAvatarUrl = computed(() => {
+  if (!profileAvatarUrl.value || avatarLoadFailed.value) return ""
+
+  if (profileAvatarUpdatedAt.value) {
+    return `${profileAvatarUrl.value}?v=${profileAvatarUpdatedAt.value}`
+  }
+
+  return profileAvatarUrl.value
+})
 
 /* =========================================================
    SECTION 7: Auth Check
@@ -121,7 +147,14 @@ onMounted(async () => {
   }
 
   user.value = data.session.user
-  userEmail.value = data.session.user.email
+  userEmail.value = data.session.user.email || ""
+
+  const metadata = data.session.user.user_metadata || {}
+
+  profileAvatarUrl.value = metadata.avatar_url || ""
+  profileAvatarUpdatedAt.value = metadata.avatar_updated_at || ""
+  avatarLoadFailed.value = false
+
   loading.value = false
 
   await loadRecentRooms()
@@ -370,6 +403,13 @@ async function signOut() {
            - Half screen: sidebar becomes 3-dot menu
            - Keep title and actions aligned in one row
       ================================================== -->
+      <!-- =================================================
+          SECTION 4: Topbar
+          Purpose:
+          - Full screen: title + user actions
+          - Half screen: sidebar becomes 3-dot menu
+          - Keep title and actions aligned in one row
+      ================================================== -->
       <header class="topbar">
         <div class="topbar-left">
           <button class="mobile-menu-btn" @click="toggleMobileMenu">
@@ -388,8 +428,24 @@ async function signOut() {
             Connected
           </span>
 
-          <span v-if="loading" class="user-pill">Loading...</span>
-          <span v-else class="user-pill">{{ userEmail }}</span>
+          <!-- Profile circle button -->
+          <button
+            class="profile-circle"
+            @click="router.push('/profile')"
+            title="Open profile"
+          >
+            <img
+              v-if="dashboardAvatarUrl"
+              :src="dashboardAvatarUrl"
+              alt="Profile avatar"
+              class="profile-circle-img"
+              @error="avatarLoadFailed = true"
+            />
+
+            <span v-else class="profile-initial">
+              {{ profileInitial }}
+            </span>
+          </button>
 
           <button class="logout-btn" @click="signOut">
             Sign out
@@ -959,7 +1015,57 @@ button:hover {
   min-height: 100vh;
   padding: 28px;
 }
+/* =================================================
+   SECTION 4.3: Profile Circle Button
+   Purpose:
+   - Shows uploaded avatar in dashboard topbar
+   - Falls back to user initial when avatar is unavailable
+   - Opens Profile page
+================================================== */
+.profile-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  padding: 0;
+  overflow: hidden;
 
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f172a;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: pointer;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.profile-circle:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.13);
+}
+
+.profile-circle:active {
+  transform: translateY(0);
+}
+
+.profile-circle-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.profile-initial {
+  color: #07111f;
+  font-size: 24px;
+  font-weight: 950;
+  line-height: 1;
+}
 /* =========================================================
    SECTION 5: Topbar
    Purpose:

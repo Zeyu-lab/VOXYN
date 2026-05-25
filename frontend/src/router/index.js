@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import Home from "../pages/Home.vue";
 import Login from "../pages/Login.vue";
 import Dashboard from "../pages/Dashboard.vue";
+import Profile from "../pages/Profile.vue"
 import RoomView from "../pages/RoomView.vue"
 const routes = [
   {
@@ -23,6 +24,11 @@ const routes = [
   {
     path: "/room/:roomCode",
     component: RoomView
+  },
+  {
+    path: "/profile",
+    name: "Profile",
+    component: Profile,
   }
 ];
 
