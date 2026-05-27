@@ -23,6 +23,7 @@ const routes = [
   },
   {
     path: "/room/:roomCode",
+    name: "room",
     component: RoomView
   },
   {

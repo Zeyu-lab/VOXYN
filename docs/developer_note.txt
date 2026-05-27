@@ -23,3 +23,18 @@ Updates:
 
 VOXYN v0.311 Update
 - Delete old avatar path replace with new without cost extra memory
+
+Voxyn v0.4 update
+VOXYN from a basic Express backend into a realtime backend using Socket.IO.
+
+Updates:
+- Added Socket.IO backend support.
+- Added realtime room join logic.
+- Added realtime chat message sending.
+- Added room leave and disconnect cleanup.
+- Added temporary in-memory room storage.
+- Added recent message history for each active room.
+- Added online user tracking per room.
+- Connected RoomView chat input to the backend socket events.
+- Fixed setup issues with frontend socket import and Supabase client sharing.
+- Confirmed that localhost:5173 is only a development origin, not a permanent requirement.

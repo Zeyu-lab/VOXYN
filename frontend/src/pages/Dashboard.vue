@@ -186,8 +186,8 @@ function formatRoomTime(value) {
 /* =========================================================
    SECTION 10: Load Recent Rooms
    Purpose:
-   - Load latest rooms created by the current user
-   - Keep Dashboard useful instead of showing fake chart data
+   - Load latest rooms owned by the current user
+   - Match the new Supabase rooms table using owner_id
 ========================================================= */
 async function loadRecentRooms() {
   if (!user.value) return
@@ -195,14 +195,14 @@ async function loadRecentRooms() {
   const { data, error } = await supabase
     .from("rooms")
     .select("*")
-    .eq("created_by", user.value.id)
+    .eq("owner_id", user.value.id)
     .order("created_at", { ascending: false })
     .limit(5)
 
   if (error) {
     activityFeed.value.unshift({
       title: "Recent rooms unavailable",
-      detail: "Check your Supabase rooms table."
+      detail: error.message || "Check your Supabase rooms table."
     })
     return
   }
@@ -213,9 +213,10 @@ async function loadRecentRooms() {
 /* =========================================================
    SECTION 11: Create Room
    Purpose:
+   - Free MVP rule: each user can only own one room
+   - Delete old owned rooms before creating a new one
    - Create a new room in Supabase
-   - Redirect user to the new room page
-   - Save max member limit when database supports it
+   - Redirect user to the new RoomView page
 ========================================================= */
 async function createRoom() {
   errorMessage.value = ""
@@ -231,30 +232,32 @@ async function createRoom() {
   const newRoomCode = generateRoomCode()
   const cleanRoomName = roomName.value.trim() || "Untitled Room"
 
+  /*
+    Free MVP rule:
+    A free user can only own one active room.
+    Creating a new room removes the previous one first.
+  */
+  const { error: deleteError } = await supabase
+    .from("rooms")
+    .delete()
+    .eq("owner_id", user.value.id)
+
+  if (deleteError) {
+    actionLoading.value = false
+    errorMessage.value = deleteError.message
+    return
+  }
+
   const roomPayload = {
     room_code: newRoomCode,
     room_name: cleanRoomName,
-    created_by: user.value.id,
+    owner_id: user.value.id,
     max_members: maxMembers.value
   }
 
-  let { error } = await supabase.from("rooms").insert(roomPayload)
-
-  /*
-    Fallback:
-    If your current rooms table does not have max_members yet,
-    this keeps Create Room working while you update Supabase later.
-  */
-  if (error && error.message?.toLowerCase().includes("max_members")) {
-    const fallbackPayload = {
-      room_code: newRoomCode,
-      room_name: cleanRoomName,
-      created_by: user.value.id
-    }
-
-    const fallbackResult = await supabase.from("rooms").insert(fallbackPayload)
-    error = fallbackResult.error
-  }
+  const { error } = await supabase
+    .from("rooms")
+    .insert(roomPayload)
 
   actionLoading.value = false
 
@@ -265,12 +268,13 @@ async function createRoom() {
 
   activityFeed.value.unshift({
     title: `Room ${newRoomCode} created`,
-    detail: `${cleanRoomName} is ready for voice, chat, and games.`
+    detail: `${cleanRoomName} replaced your previous room.`
   })
+
+  await loadRecentRooms()
 
   router.push(`/room/${newRoomCode}`)
 }
-
 /* =========================================================
    SECTION 12: Join Room
    Purpose:
@@ -331,8 +335,51 @@ async function copyRoomCode(code) {
   } catch {
     errorMessage.value = "Could not copy room code."
   }
-}
+}/* =========================================================
+   SECTION 13.5: Delete Room
+   Purpose:
+   - Allow user to manually delete an owned room
+   - Prevent free MVP room data from piling up
+========================================================= */
+async function deleteRoom(room) {
+  errorMessage.value = ""
+  successMessage.value = ""
 
+  if (!room?.id) {
+    errorMessage.value = "Room data is missing."
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Delete room ${room.room_code}? This cannot be undone.`
+  )
+
+  if (!confirmed) return
+
+  actionLoading.value = true
+
+  const { error } = await supabase
+    .from("rooms")
+    .delete()
+    .eq("id", room.id)
+    .eq("owner_id", user.value.id)
+
+  actionLoading.value = false
+
+  if (error) {
+    errorMessage.value = error.message
+    return
+  }
+
+  successMessage.value = `Room ${room.room_code} deleted.`
+
+  activityFeed.value.unshift({
+    title: `Room ${room.room_code} deleted`,
+    detail: "The old room and its members were removed."
+  })
+
+  await loadRecentRooms()
+}
 /* =========================================================
    SECTION 14: Sign Out
    Purpose:
@@ -768,9 +815,21 @@ async function signOut() {
                   1 / {{ room.max_members || 5 }}
                 </span>
 
-                <button class="enter-btn liquid-action" @click="enterRoom(room.room_code)">
-                  Enter
-                </button>
+                <div class="room-action-buttons">
+                  <button
+                    class="enter-btn liquid-action"
+                    @click="enterRoom(room.room_code)"
+                  >
+                    Enter
+                  </button>
+
+                  <button
+                    class="delete-room-btn"
+                    @click="deleteRoom(room)"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1787,12 +1846,13 @@ button:disabled {
 ========================================================= */
 .bottom-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.9fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 
 .recent-panel {
-  grid-row: span 2;
+  grid-column: 1 / -1;
+  grid-row: auto;
 }
 
 .bottom-panel {
@@ -1821,9 +1881,9 @@ button:disabled {
 .room-table-head,
 .room-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) 120px 105px 92px;
-  gap: 12px;
+  grid-template-columns: minmax(220px, 1fr) 170px 140px 280px;
   align-items: center;
+  gap: 18px;
 }
 
 .room-table-head {
@@ -2127,11 +2187,22 @@ button:disabled {
   }
 
   .room-row {
-    grid-template-columns: 1fr 110px;
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .members-pill {
-    display: none;
+    display: inline-flex;
+  }
+
+  .room-action-buttons {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .room-action-buttons .enter-btn,
+  .delete-room-btn {
+    flex: 1;
   }
 }
 
@@ -2188,6 +2259,52 @@ button:disabled {
   .enter-btn {
     width: 100%;
   }
+}
+
+/* =========================================================
+   SECTION 23: Recent Room Action Buttons
+   Purpose:
+   - Keep Enter and Delete buttons aligned
+   - Prevent Enter button from being squeezed
+========================================================= */
+.room-action-buttons {
+  width: 100%;
+  min-width: 250px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.room-action-buttons .enter-btn,
+.delete-room-btn {
+  min-width: 115px;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.room-action-buttons .enter-btn {
+  color: white;
+  background: linear-gradient(135deg, #38bdf8, #1d9bf0);
+}
+
+.delete-room-btn {
+  border: none;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.delete-room-btn:hover {
+  background: rgba(239, 68, 68, 0.16);
+  transform: translateY(-1px);
 }
 </style>
 
