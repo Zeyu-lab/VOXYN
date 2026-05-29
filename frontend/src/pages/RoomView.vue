@@ -823,14 +823,22 @@ function formatChatTime(timestamp) {
 ========================================================= */
 
 .room-page {
+  width: 100%;
+  max-width: 100vw;
+  min-width: 0;
   min-height: 100vh;
+
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
+
   background: #eef5fb;
   color: #0f172a;
+  overflow-x: hidden;
 }
 
 .room-main {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   padding: 18px 22px;
 }
@@ -1626,30 +1634,121 @@ function formatChatTime(timestamp) {
 
 /* =========================================================
    SECTION 10: Responsive
+   Purpose:
+   - Keep full-size RoomView layout on wide screens
+   - Hide left rail when the browser becomes half-screen
+   - Prevent chat panel / create strip from overflowing right side
 ========================================================= */
-@media (max-width: 1240px) {
-  .workspace-grid {
-    grid-template-columns: 260px minmax(520px, 1fr) 340px;
-  }
-
-  .create-strip {
-    grid-template-columns: 500px minmax(0, 1fr);
-    gap: 20px;
-  }
-
-  .create-strip-control {
-    padding-left: 14px;
-    grid-template-columns: minmax(280px, 1fr) 280px 220px;
-  }
-}
-
-@media (max-width: 760px) {
+@media (max-width: 1350px) {
   .room-page {
     grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
   }
 
   .left-rail {
     display: none;
+  }
+
+  .room-main {
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    padding: 16px 18px;
+    overflow-x: hidden;
+  }
+
+  .room-header,
+  .create-strip,
+  .workspace-grid,
+  .workspace-sidebar,
+  .center-workspace,
+  .chat-card,
+  .member-bar,
+  .game-area,
+  .bottom-tabs {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .create-strip {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 16px 18px;
+    overflow: visible;
+  }
+
+  .create-strip-left {
+    min-width: 0;
+  }
+
+  .create-strip h2,
+  .create-strip p {
+    white-space: normal;
+  }
+
+  .create-strip-control {
+    width: 100%;
+    min-width: 0;
+    padding-left: 0;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 240px) minmax(150px, 190px);
+    gap: 12px;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .workspace-sidebar {
+    align-content: start;
+  }
+
+  .center-workspace {
+    grid-template-rows: auto minmax(340px, 1fr) 58px;
+  }
+
+  .member-bar {
+    grid-template-columns: 150px minmax(0, 1fr) auto auto;
+    gap: 12px;
+  }
+
+  .chat-card {
+    grid-column: 1 / -1;
+    min-height: 360px;
+    max-height: 460px;
+  }
+
+  .chat-list {
+    max-height: 300px;
+  }
+}
+
+/* =========================================================
+   SECTION 10.5: Tight Half Screen
+   Purpose:
+   - Stack the room workspace before it starts squeezing
+========================================================= */
+@media (max-width: 980px) {
+  .room-main {
+    padding: 14px;
+  }
+
+  .room-header {
+    min-height: auto;
+    padding: 18px;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .room-header h1 {
+    font-size: 24px;
+  }
+
+  .create-strip-control {
+    grid-template-columns: 1fr;
   }
 
   .workspace-grid {
@@ -1660,44 +1759,106 @@ function formatChatTime(timestamp) {
     grid-template-columns: 1fr 1fr;
   }
 
-  .create-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .create-strip-control {
-    grid-template-columns: 1fr;
-  }
-
-  .chat-card {
-    min-height: 420px;
-  }
-}
-
-@media (max-width: 720px) {
-  .room-main {
-    padding: 14px;
-  }
-
-  .room-header,
-  .create-strip,
-  .workspace-sidebar {
-    grid-template-columns: 1fr;
+  .center-workspace {
+    grid-template-rows: auto minmax(320px, auto) 58px;
   }
 
   .member-bar {
     grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .member-avatars {
+    justify-content: flex-start;
+  }
+
+  .invite-btn {
+    width: 100%;
+  }
+
+  .chat-card {
+    min-height: 420px;
+    max-height: none;
+  }
+
+  .chat-list {
+    max-height: none;
+  }
+}
+
+/* =========================================================
+   SECTION 11: Phone Layout
+   Purpose:
+   - Phone-sized RoomView stack
+========================================================= */
+@media (max-width: 720px) {
+  .room-page {
+    grid-template-columns: 1fr;
+  }
+
+  .left-rail {
+    display: none;
+  }
+
+  .room-main {
+    padding: 14px;
+  }
+
+  .back-btn {
+    width: 100%;
+  }
+
+  .room-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .create-strip {
+    grid-template-columns: 1fr;
+    border-radius: 22px;
+  }
+
+  .create-strip-left {
+    align-items: flex-start;
+  }
+
+  .plus-box {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
   }
 
   .workspace-sidebar {
-    display: grid;
-  }
-
-  .game-area {
-    min-height: 340px;
+    grid-template-columns: 1fr;
   }
 
   .room-code-card h2 {
     font-size: 30px;
   }
+
+  .game-area {
+    min-height: 340px;
+    padding: 22px;
+  }
+
+  .game-area p {
+    font-size: 26px;
+    letter-spacing: 0.26em;
+  }
+
+  .bottom-tabs {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .chat-message {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .chat-avatar {
+    width: 34px;
+    height: 34px;
+  }
 }
+
 </style>

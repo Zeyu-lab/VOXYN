@@ -6,7 +6,7 @@
    - Load router
    - Load Supabase client
 ========================================================= */
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, onBeforeUnmount, ref } from "vue"
 import { useRouter } from "vue-router"
 import { supabase } from "../lib/supabaseClient"
 
@@ -52,6 +52,35 @@ const memberLimitOptions = [5, 8, 10]
    - In half screen / mobile screen, sidebar becomes topbar menu
 ========================================================= */
 const showMobileMenu = ref(false)
+const isHalfScreen = ref(false)
+
+let dashboardLargestWidth = 0
+
+function updateDashboardLayoutMode() {
+  const currentWidth = window.innerWidth
+
+  if (currentWidth > dashboardLargestWidth) {
+    dashboardLargestWidth = currentWidth
+  }
+
+  const lostEnoughWidth = dashboardLargestWidth - currentWidth >= 180
+  const becameHalfLike = currentWidth <= dashboardLargestWidth * 0.92
+
+  isHalfScreen.value = lostEnoughWidth && becameHalfLike
+
+  if (!isHalfScreen.value) {
+    showMobileMenu.value = false
+  }
+}
+
+onMounted(() => {
+  updateDashboardLayoutMode()
+  window.addEventListener("resize", updateDashboardLayoutMode)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("resize", updateDashboardLayoutMode)
+})
 
 const navItems = [
   "Dashboard",
@@ -400,7 +429,7 @@ async function signOut() {
        - Large screen: sidebar + main area
        - Small screen: main area only, sidebar hidden
   ====================================================== -->
-  <main class="dashboard-shell">
+  <main class="dashboard-shell" :class="{ 'half-screen-mode': isHalfScreen }">
 
     <!-- ===================================================
          SECTION 2: Desktop Sidebar
@@ -2632,5 +2661,251 @@ button:disabled {
   background: rgba(239, 68, 68, 0.16);
   transform: translateY(-1px);
 }
+
+
+/* =========================================================
+   SECTION 24: v0.42 Final Layout Fix
+   Purpose:
+   - Full size keeps the v0.41 white rail sidebar
+   - Real half-screen mode hides sidebar completely
+   - Half-screen uses the 3-dot topbar menu instead
+   - This section intentionally stays at the bottom to override older media rules
+========================================================= */
+.dashboard-shell {
+  padding-left: 112px;
+}
+
+.sidebar {
+  display: flex;
+  width: 92px;
+  padding: 20px 12px;
+  align-items: center;
+
+  background: rgba(255, 255, 255, 0.76);
+  color: #475569;
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 12px 0 36px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 34px;
+}
+
+.brand > div:not(.brand-mark) {
+  display: none;
+}
+
+.brand-mark {
+  width: 58px;
+  height: 58px;
+  border-radius: 20px;
+  font-size: 0;
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.24);
+}
+
+.brand-mark::before {
+  content: "◆";
+  color: white;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.side-nav {
+  width: 100%;
+  gap: 12px;
+}
+
+.nav-item {
+  position: relative;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 6px 8px;
+
+  display: grid;
+  place-items: center;
+  text-align: center;
+
+  border-radius: 18px;
+  color: #475569;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1.1;
+  font-weight: 850;
+}
+
+.nav-item::before {
+  display: block;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.nav-item:nth-child(1)::before {
+  content: "▦";
+}
+
+.nav-item:nth-child(2)::before {
+  content: "⌂";
+}
+
+.nav-item:nth-child(3)::before {
+  content: "◉";
+}
+
+.nav-item:nth-child(4)::before {
+  content: "⌘";
+}
+
+.nav-item:nth-child(5)::before {
+  content: "◎";
+}
+
+.nav-item:nth-child(6)::before {
+  content: "⚙";
+}
+
+.nav-item.active,
+.nav-item:hover {
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.95);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.12);
+}
+
+.nav-item.active::before,
+.nav-item:hover::before {
+  color: #4f46e5;
+}
+
+.sidebar-footer {
+  width: 58px;
+  height: 58px;
+  margin-top: auto;
+  padding: 0;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 20px;
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.22);
+}
+
+.sidebar-footer p,
+.sidebar-footer span {
+  display: none;
+}
+
+.sidebar-footer strong {
+  margin: 0;
+  font-size: 0;
+}
+
+.sidebar-footer strong::before {
+  content: "Z";
+  color: white;
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.mobile-menu-btn {
+  display: none;
+}
+
+.mobile-menu-panel {
+  display: none;
+}
+
+.dashboard-shell.half-screen-mode {
+  padding-left: 0 !important;
+}
+
+.dashboard-shell.half-screen-mode .sidebar {
+  display: none !important;
+}
+
+.dashboard-shell.half-screen-mode .main-area {
+  width: 100%;
+  max-width: 100vw;
+  min-width: 0;
+  padding: 18px;
+}
+
+.dashboard-shell.half-screen-mode .topbar {
+  min-height: 84px;
+  padding: 0 22px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.dashboard-shell.half-screen-mode .topbar-left {
+  gap: 14px;
+}
+
+.dashboard-shell.half-screen-mode .mobile-menu-btn {
+  display: grid !important;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+
+  color: #0f172a;
+  font-size: 28px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.dashboard-shell.half-screen-mode .mobile-menu-panel {
+  position: absolute;
+  top: 110px;
+  left: 18px;
+  z-index: 50;
+  width: 250px;
+  padding: 12px;
+
+  display: grid;
+  gap: 6px;
+
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.dashboard-shell.half-screen-mode .connection-pill {
+  display: inline-flex;
+}
+
+.dashboard-shell.half-screen-mode .profile-circle {
+  width: 48px;
+  height: 48px;
+}
+
+.dashboard-shell.half-screen-mode .logout-btn {
+  min-height: 42px;
+  padding: 10px 14px;
+}
+
+@media (max-width: 560px) {
+  .dashboard-shell.half-screen-mode .topbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    padding: 16px;
+  }
+
+  .dashboard-shell.half-screen-mode .mobile-menu-panel {
+    top: 124px;
+    left: 14px;
+    right: 14px;
+    width: auto;
+  }
+}
+
 </style>
 
