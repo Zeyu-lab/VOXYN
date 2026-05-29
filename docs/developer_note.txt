@@ -38,3 +38,7 @@ Updates:
 - Connected RoomView chat input to the backend socket events.
 - Fixed setup issues with frontend socket import and Supabase client sharing.
 - Confirmed that localhost:5173 is only a development origin, not a permanent requirement.
+
+v0.41 update:
+- Optimized the VOXYN sidebar / rail navigation buttons
+- Adjustment the size regarding has in half and full screen

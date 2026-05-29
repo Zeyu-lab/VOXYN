@@ -2059,126 +2059,349 @@ button:disabled {
   color: #111827;
   font-size: 14px;
 }
-
 /* =========================================================
    SECTION 19: Half Screen Layout
    Purpose:
-   - Sidebar disappears
-   - 3-dot menu appears beside title
-   - Topbar remains one clean horizontal row
+   - Only activate compact rail on real half-screen width
+   - Keep full-size desktop as original full sidebar
 ========================================================= */
-@media (max-width: 1320px) {
+@media (max-width: 2000px) {
   .dashboard-shell {
-    padding-left: 0;
+    padding-left: 112px;
   }
 
   .sidebar {
+    display: flex;
+    width: 92px;
+    padding: 20px 12px;
+    align-items: center;
+
+    background: rgba(255, 255, 255, 0.76);
+    border-right: 1px solid rgba(226, 232, 240, 0.9);
+    box-shadow: 12px 0 36px rgba(15, 23, 42, 0.06);
+    backdrop-filter: blur(18px);
+  }
+
+  .brand {
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 34px;
+  }
+
+  .brand > div:not(.brand-mark) {
     display: none;
   }
 
+  .brand-mark {
+    width: 58px;
+    height: 58px;
+    border-radius: 20px;
+    font-size: 0;
+    background: linear-gradient(135deg, #38bdf8, #4f46e5);
+    box-shadow: 0 18px 36px rgba(37, 99, 235, 0.24);
+  }
+
+  .brand-mark::before {
+    content: "◆";
+    color: white;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .side-nav {
+    width: 100%;
+    gap: 12px;
+  }
+
+  .nav-item {
+    position: relative;
+    width: 100%;
+    min-height: 72px;
+    padding: 12px 6px 8px;
+
+    display: grid;
+    place-items: center;
+    text-align: center;
+
+    border-radius: 18px;
+    font-size: 11px;
+    line-height: 1.1;
+    color: #475569;
+    background: transparent;
+  }
+
+  .nav-item::before {
+    display: block;
+    margin-bottom: 8px;
+    color: #64748b;
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 900;
+  }
+
+  .nav-item:nth-child(1)::before {
+    content: "▦";
+  }
+
+  .nav-item:nth-child(2)::before {
+    content: "⌂";
+  }
+
+  .nav-item:nth-child(3)::before {
+    content: "◉";
+  }
+
+  .nav-item:nth-child(4)::before {
+    content: "⌘";
+  }
+
+  .nav-item:nth-child(5)::before {
+    content: "◎";
+  }
+
+  .nav-item:nth-child(6)::before {
+    content: "⚙";
+  }
+
+  .nav-item.active,
+  .nav-item:hover {
+    color: #2563eb;
+    background: rgba(239, 246, 255, 0.95);
+    box-shadow: 0 14px 30px rgba(37, 99, 235, 0.12);
+  }
+
+  .nav-item.active::before,
+  .nav-item:hover::before {
+    color: #4f46e5;
+  }
+
+  .sidebar-footer {
+    width: 58px;
+    height: 58px;
+    margin-top: auto;
+    padding: 0;
+
+    display: grid;
+    place-items: center;
+
+    border-radius: 20px;
+    background: linear-gradient(135deg, #38bdf8, #4f46e5);
+    box-shadow: 0 16px 34px rgba(37, 99, 235, 0.22);
+  }
+
+  .sidebar-footer p,
+  .sidebar-footer span {
+    display: none;
+  }
+
+  .sidebar-footer strong {
+    margin: 0;
+    font-size: 0;
+  }
+
+  .sidebar-footer strong::before {
+    content: "Z";
+    color: white;
+    font-size: 18px;
+    font-weight: 950;
+  }
+
   .main-area {
-    padding: 24px;
+    padding: 22px;
+  }
+
+  .topbar {
+    min-height: 84px;
+    padding: 0 24px;
+    border-radius: 24px;
+    margin-bottom: 20px;
+  }
+
+  .topbar-left {
+    gap: 0;
   }
 
   .mobile-menu-btn {
-    display: grid;
-    place-items: center;
+    display: none;
   }
 
   .mobile-menu-panel {
-    position: absolute;
-    top: 116px;
-    left: 24px;
-    z-index: 50;
-    width: 250px;
-    padding: 12px;
-    display: grid;
-    gap: 6px;
-    border-radius: 22px;
-    background: white;
-    border: 1px solid #e2e8f0;
-    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+    display: none;
   }
-}
 
-/* =========================================================
-   SECTION 20: Medium Screen Dashboard Layout
-   Purpose:
-   - Keep dashboard compact after sidebar disappears
-========================================================= */
-@media (max-width: 1120px) {
+  .profile-circle {
+    width: 52px;
+    height: 52px;
+  }
+
   .hero-panel {
+    min-height: 176px;
     grid-template-columns: 1fr;
+    padding: 26px 30px;
+    margin-bottom: 18px;
+  }
+
+  .hero-copy h2 {
+    font-size: clamp(34px, 5vw, 46px);
+    line-height: 1.03;
+  }
+
+  .hero-copy p:last-child {
+    max-width: 540px;
+    margin-top: 14px;
+    font-size: 15px;
+    line-height: 1.55;
   }
 
   .hero-map {
-    justify-self: start;
+    justify-self: center;
+    width: 330px;
+    height: 190px;
+    margin-top: 8px;
+    transform: scale(0.86);
+    transform-origin: center;
+  }
+
+  .room-core {
+    left: 82px;
+    top: 68px;
+  }
+
+  .chat-pill {
+    top: 12px;
+    right: 24px;
+  }
+
+  .voice-pill {
+    left: 2px;
+    bottom: 38px;
+  }
+
+  .game-pill {
+    right: 0;
+    bottom: 12px;
   }
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .stat-card {
+    padding: 20px;
+  }
+
+  .stat-card h2 {
+    font-size: 28px;
   }
 
   .content-grid,
   .bottom-grid {
     grid-template-columns: 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+  }
+
+  .side-stack {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .panel,
+  .bottom-panel {
+    padding: 24px;
+  }
+
+  .room-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .room-box {
+    min-height: 330px;
+    padding: 20px;
+  }
+
+  .room-box h3 {
+    font-size: 20px;
+  }
+
+  .room-box p {
+    font-size: 14px;
   }
 
   .recent-panel {
     grid-row: auto;
   }
 
-  .side-stack {
-    grid-template-columns: 1fr 1fr;
+  .room-table-head,
+  .room-row {
+    grid-template-columns: minmax(180px, 1fr) 130px 110px 220px;
+    gap: 12px;
+  }
+
+  .room-action-buttons {
+    min-width: 210px;
   }
 }
 
 /* =========================================================
-   SECTION 21: Narrow Screen Layout
+   SECTION 20: Smaller Half Screen
    Purpose:
-   - Hide email when width is limited
-   - Keep title and sign out in the same topbar row
+   - Make half-screen more comfortable before tablet mode
 ========================================================= */
 @media (max-width: 820px) {
+  .dashboard-shell {
+    padding-left: 104px;
+  }
+
+  .sidebar {
+    width: 84px;
+    padding-inline: 12px;
+  }
+
+  .brand-mark,
+  .sidebar-footer {
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+  }
+
+  .nav-item {
+    min-height: 68px;
+    font-size: 10px;
+  }
+
+  .nav-item::before {
+    font-size: 20px;
+  }
+
   .topbar {
-    min-height: 88px;
-    padding: 0 20px;
-    gap: 14px;
-  }
-
-  .topbar-left {
-    gap: 14px;
-  }
-
-  .mobile-menu-btn {
-    width: 48px;
-    height: 48px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    min-height: 82px;
   }
 
   h1 {
-    font-size: 23px;
+    font-size: 27px;
   }
 
-  .connection-pill,
-  .user-pill {
-    display: none;
+  .connection-pill {
+    padding-inline: 12px;
   }
 
-  .hero-panel {
-    padding: 24px;
-    min-height: auto;
-  }
-
-  .hero-copy h2 {
-    font-size: 36px;
+  .logout-btn {
+    padding-inline: 14px;
   }
 
   .hero-map {
     display: none;
   }
 
-  .room-actions,
   .side-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .room-actions {
     grid-template-columns: 1fr;
   }
 
@@ -2189,10 +2412,6 @@ button:disabled {
   .room-row {
     grid-template-columns: 1fr;
     gap: 14px;
-  }
-
-  .members-pill {
-    display: inline-flex;
   }
 
   .room-action-buttons {
@@ -2207,9 +2426,111 @@ button:disabled {
 }
 
 /* =========================================================
+   SECTION 21: Tablet / Narrow Layout
+   Purpose:
+   - Hide compact rail
+   - Use topbar 3-dot menu only when screen is truly narrow
+========================================================= */
+@media (max-width: 760px) {
+  .dashboard-shell {
+    padding-left: 0;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main-area {
+    padding: 18px;
+  }
+
+  .topbar {
+    min-height: 84px;
+    padding: 0 18px;
+    gap: 14px;
+  }
+
+  .topbar-left {
+    gap: 14px;
+  }
+
+  .mobile-menu-btn {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+
+    color: #0f172a;
+    font-size: 28px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  }
+
+  .mobile-menu-panel {
+    position: absolute;
+    top: 104px;
+    left: 18px;
+    z-index: 50;
+    width: 250px;
+    padding: 12px;
+
+    display: grid;
+    gap: 6px;
+
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.16);
+    backdrop-filter: blur(18px);
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .page-label,
+  .panel-label {
+    font-size: 11px;
+    margin-bottom: 6px;
+  }
+
+  .connection-pill {
+    display: none;
+  }
+
+  .profile-circle {
+    width: 48px;
+    height: 48px;
+  }
+
+  .logout-btn {
+    min-height: 42px;
+    padding: 10px 14px;
+  }
+
+  .hero-panel {
+    padding: 24px;
+    min-height: auto;
+  }
+
+  .hero-copy h2 {
+    font-size: 34px;
+  }
+
+  .hero-copy p:last-child {
+    font-size: 15px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* =========================================================
    SECTION 22: Small Mobile Layout
    Purpose:
-   - Stack content for phone-sized screens
+   - Phone-sized dashboard stack
 ========================================================= */
 @media (max-width: 560px) {
   .main-area {
@@ -2218,7 +2539,7 @@ button:disabled {
 
   .topbar {
     min-height: auto;
-    padding: 18px;
+    padding: 16px;
     grid-template-columns: 1fr;
     align-items: stretch;
   }
@@ -2228,7 +2549,7 @@ button:disabled {
   }
 
   .mobile-menu-panel {
-    top: 126px;
+    top: 124px;
     left: 14px;
     right: 14px;
     width: auto;
@@ -2256,8 +2577,13 @@ button:disabled {
   }
 
   .code-pill,
-  .enter-btn {
+  .enter-btn,
+  .delete-room-btn {
     width: 100%;
+  }
+
+  .room-action-buttons {
+    flex-direction: column;
   }
 }
 

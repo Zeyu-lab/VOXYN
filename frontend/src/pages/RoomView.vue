@@ -69,6 +69,44 @@ const selectedTab = ref("Game")
 const selectedVoiceChannel = ref("Lounge")
 
 const tabs = ["Game", "Voice", "Settings"]
+const roomRailItems = [
+  {
+    label: "Dashboard",
+    icon: "▦",
+    route: "/dashboard"
+  },
+  {
+    label: "My Rooms",
+    icon: "⌂",
+    route: "/dashboard"
+  },
+  {
+    label: "Voice Rooms",
+    icon: "○",
+    route: null
+  },
+  {
+    label: "Games",
+    icon: "⌘",
+    route: null
+  },
+  {
+    label: "Profile",
+    icon: "◎",
+    route: "/profile"
+  },
+  {
+    label: "Settings",
+    icon: "⚙",
+    route: null
+  }
+]
+
+function goRoomRail(item) {
+  if (item.route) {
+    router.push(item.route)
+  }
+}
 
 const voiceChannels = computed(() => [
   {
@@ -500,34 +538,26 @@ function formatChatTime(timestamp) {
          SECTION 1: Left Rail
     ====================================================== -->
     <aside class="left-rail">
-      <div class="rail-logo">◆</div>
+      <button class="rail-logo" @click="backToDashboard">
+        ◆
+      </button>
 
       <nav class="rail-nav">
-        <button @click="backToDashboard">
-          ⌂
-          <span>Home</span>
-        </button>
-
-        <button class="active">
-          ◆
-          <span>Rooms</span>
-        </button>
-
-        <button>
-          ○
-          <span>Profile</span>
-        </button>
-
-        <button>
-          ⚙
-          <span>Settings</span>
+        <button
+          v-for="item in roomRailItems"
+          :key="item.label"
+          :class="{ active: item.label === 'Voice Rooms' }"
+          @click="goRoomRail(item)"
+        >
+          <span class="rail-icon">{{ item.icon }}</span>
+          <span class="rail-label">{{ item.label }}</span>
         </button>
       </nav>
 
-      <div class="rail-user">
+      <button class="rail-user" @click="router.push('/profile')">
         {{ user?.email?.charAt(0)?.toUpperCase() || "U" }}
         <span></span>
-      </div>
+      </button>
     </aside>
 
     <!-- =====================================================
@@ -795,7 +825,7 @@ function formatChatTime(timestamp) {
 .room-page {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 84px 1fr;
+  grid-template-columns: 104px minmax(0, 1fr);
   background: #eef5fb;
   color: #0f172a;
 }
@@ -819,76 +849,148 @@ function formatChatTime(timestamp) {
 
 /* =========================================================
    SECTION 2: Left Rail
+   Purpose:
+   - Match Dashboard compact rail
+   - Keep RoomView and Dashboard navigation visually consistent
 ========================================================= */
 .left-rail {
+  width: 92px;
   min-height: 100vh;
-  padding: 22px 12px;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background: rgba(255, 255, 255, 0.72);
-  border-right: 1px solid #e2e8f0;
+  min-height: 100dvh;
+  padding: 20px 12px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  background: rgba(255, 255, 255, 0.76);
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 12px 0 36px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(18px);
+
+  z-index: 40;
 }
 
 .rail-logo {
-  width: 42px;
-  height: 42px;
-  margin: 0 auto 32px;
+  width: 58px;
+  height: 58px;
+  margin: 0 0 34px;
+
   display: grid;
   place-items: center;
-  border-radius: 16px;
+
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+
   color: white;
-  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  font-size: 22px;
   font-weight: 950;
+  line-height: 1;
+
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.24);
 }
 
 .rail-nav {
+  width: 100%;
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .rail-nav button {
-  min-height: 58px;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px 6px 8px;
+
   display: grid;
   place-items: center;
-  gap: 4px;
+  text-align: center;
+
   border: none;
   border-radius: 18px;
-  background: transparent;
-  color: #64748b;
   cursor: pointer;
-  font-weight: 850;
-}
 
-.rail-nav button span {
+  color: #475569;
+  background: transparent;
+  font-family: inherit;
   font-size: 11px;
+  font-weight: 850;
+  line-height: 1.1;
+
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
-.rail-nav button.active {
+.rail-nav button:hover {
+  transform: translateY(-1px);
+}
+
+.rail-nav button.active,
+.rail-nav button:hover {
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.95);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.12);
+}
+
+.rail-icon {
+  display: grid;
+  place-items: center;
+
+  width: 28px;
+  height: 28px;
+  margin-bottom: 8px;
+
+  color: #64748b;
+  font-size: 21px;
+  line-height: 1;
+  font-weight: 900;
+}
+
+.rail-nav button.active .rail-icon,
+.rail-nav button:hover .rail-icon {
   color: #4f46e5;
-  background: #eef2ff;
+}
+
+.rail-label {
+  display: block;
 }
 
 .rail-user {
+  width: 58px;
+  height: 58px;
+  margin-top: auto;
+
   position: relative;
-  width: 42px;
-  height: 42px;
-  margin: 0 auto;
+
   display: grid;
   place-items: center;
-  border-radius: 16px;
+
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+
   color: white;
-  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 16px 34px rgba(37, 99, 235, 0.22);
+
+  font-size: 18px;
   font-weight: 950;
 }
 
 .rail-user span {
   position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 11px;
-  height: 11px;
+  right: 4px;
+  bottom: 4px;
+
+  width: 9px;
+  height: 9px;
   border-radius: 999px;
+
   background: #22c55e;
   border: 2px solid white;
 }
@@ -1541,7 +1643,7 @@ function formatChatTime(timestamp) {
   }
 }
 
-@media (max-width: 1240px) {
+@media (max-width: 760px) {
   .room-page {
     grid-template-columns: 1fr;
   }
