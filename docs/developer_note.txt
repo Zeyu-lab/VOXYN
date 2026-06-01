@@ -42,3 +42,12 @@ Updates:
 v0.41 update:
 - Optimized the VOXYN sidebar / rail navigation buttons
 - Adjustment the size regarding has in half and full screen
+
+v0.45 Update
+- Fixed Dashboard sidebar interaction behavior
+- Matched Dashboard sidebar logic with RoomView navigation style
+- Added shared navigation logic for sidebar and mobile menu
+- Improved half-screen responsive behavior
+- Added mobile menu backdrop close behavior
+- Prepared route entry for Profile and Settings
+- Reduced inconsistency between Dashboard and RoomView layouts

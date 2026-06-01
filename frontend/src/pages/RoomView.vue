@@ -66,9 +66,22 @@ const memberLimitOptions = [5, 8, 10]
    - Control room workspace tabs and selected voice channel
 ========================================================= */
 const selectedTab = ref("Game")
-const selectedVoiceChannel = ref("Lounge")
+const selectedVoiceChannel = ref("Lobby")
 
-const tabs = ["Game", "Voice", "Settings"]
+const tabs = [
+  {
+    label: "Game",
+    icon: "▱"
+  },
+  {
+    label: "Voice",
+    icon: "◉"
+  },
+  {
+    label: "Settings",
+    icon: "⚙"
+  }
+]
 const roomRailItems = [
   {
     label: "Dashboard",
@@ -82,12 +95,12 @@ const roomRailItems = [
   },
   {
     label: "Voice Rooms",
-    icon: "○",
+    icon: "◉",
     route: null
   },
   {
     label: "Games",
-    icon: "⌘",
+    icon: "◇",
     route: null
   },
   {
@@ -98,7 +111,7 @@ const roomRailItems = [
   {
     label: "Settings",
     icon: "⚙",
-    route: null
+    route: "/settings"
   }
 ]
 
@@ -108,20 +121,14 @@ function goRoomRail(item) {
   }
 }
 
-const voiceChannels = computed(() => [
-  {
-    name: "Lounge",
-    count: memberCount.value
-  },
-  {
-    name: "Strategy",
-    count: 0
-  },
-  {
-    name: "AFK",
-    count: 0
-  }
-])
+const voiceChannels = computed(() => {
+  const channels = ["Lobby", "Squad", "Break"]
+
+  return channels.map((name) => ({
+    name,
+    count: selectedVoiceChannel.value === name ? memberCount.value : 0
+  }))
+})
 
 const chatMessages = ref([
   {
@@ -672,7 +679,13 @@ function formatChatTime(timestamp) {
                 :class="{ active: selectedVoiceChannel === channel.name }"
                 @click="selectedVoiceChannel = channel.name"
               >
-                <span>◁ {{ channel.name }}</span>
+                <span class="channel-left">
+                  <span class="voice-icon">
+                    {{ selectedVoiceChannel === channel.name ? "◉" : "○" }}
+                  </span>
+                  <span>{{ channel.name }}</span>
+                </span>
+
                 <small>{{ channel.count }}</small>
               </button>
 
@@ -683,11 +696,19 @@ function formatChatTime(timestamp) {
               </div>
 
               <button class="channel-item simple">
-                Rules
+                <span class="section-left">
+                  <span class="section-icon">▤</span>
+                  Rules
+                </span>
+                <span class="chevron">›</span>
               </button>
 
               <button class="channel-item simple">
-                About Room
+                <span class="section-left">
+                  <span class="section-icon">ⓘ</span>
+                  About Room
+                </span>
+                <span class="chevron">›</span>
               </button>
             </div>
           </aside>
@@ -740,11 +761,12 @@ function formatChatTime(timestamp) {
             <div class="bottom-tabs">
               <button
                 v-for="tab in tabs"
-                :key="tab"
-                :class="{ active: selectedTab === tab }"
-                @click="selectedTab = tab"
+                :key="tab.label"
+                :class="{ active: selectedTab === tab.label }"
+                @click="selectedTab = tab.label"
               >
-                {{ tab }}
+                <span class="tab-icon">{{ tab.icon }}</span>
+                <span>{{ tab.label }}</span>
               </button>
             </div>
           </section>
@@ -759,7 +781,7 @@ function formatChatTime(timestamp) {
                 <p>Room messages</p>
               </div>
 
-              <button>☷</button>
+              <button aria-label="Chat options">≡</button>
             </div>
 
             <div class="chat-list">
@@ -833,6 +855,14 @@ function formatChatTime(timestamp) {
 
   background: #eef5fb;
   color: #0f172a;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   overflow-x: hidden;
 }
 
@@ -1028,8 +1058,10 @@ function formatChatTime(timestamp) {
 
 .room-header h1 {
   margin: 0;
-  font-size: 28px;
-  letter-spacing: -0.04em;
+  font-size: 30px;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: -0.05em;
 }
 
 .live-pill {
@@ -1092,6 +1124,8 @@ function formatChatTime(timestamp) {
 .create-strip h2 {
   margin: 0 0 6px;
   font-size: 18px;
+  font-weight: 950;
+  letter-spacing: -0.03em;
   white-space: nowrap;
 }
 
@@ -1227,14 +1261,16 @@ function formatChatTime(timestamp) {
   font-size: 11px;
   font-weight: 950;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
 }
 
 .room-code-card h2 {
   margin: 12px 0;
   color: #4f46e5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 38px;
-  letter-spacing: 0.12em;
+  font-weight: 950;
+  letter-spacing: 0.14em;
 }
 
 .room-code-card span {
@@ -1253,7 +1289,7 @@ function formatChatTime(timestamp) {
   font-size: 11px;
   font-weight: 950;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.18em;
 }
 
 .channel-item {
@@ -1268,13 +1304,41 @@ function formatChatTime(timestamp) {
   border-radius: 14px;
   color: #334155;
   background: transparent;
-  font-weight: 850;
+  font-size: 14px;
+  font-weight: 900;
   cursor: pointer;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
+}
+
+.channel-item:hover {
+  transform: translateY(-1px);
+  background: #f8fafc;
 }
 
 .channel-item.active {
-  color: #4f46e5;
-  background: #eef2ff;
+  color: white;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.16);
+}
+
+.channel-left,
+.section-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.voice-icon {
+  width: 18px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .channel-item small {
@@ -1285,10 +1349,38 @@ function formatChatTime(timestamp) {
   border-radius: 999px;
   color: #4f46e5;
   background: #e0e7ff;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.channel-item.active small {
+  color: #4f46e5;
+  background: rgba(255, 255, 255, 0.84);
 }
 
 .channel-item.simple {
-  justify-content: flex-start;
+  justify-content: space-between;
+  color: #334155;
+  background: transparent;
+  box-shadow: none;
+}
+
+.channel-item.simple:hover {
+  background: #f8fafc;
+}
+
+.section-icon {
+  width: 18px;
+  display: inline-grid;
+  place-items: center;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.chevron {
+  color: #94a3b8;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .card-divider {
@@ -1463,11 +1555,31 @@ function formatChatTime(timestamp) {
   color: #64748b;
   font-weight: 950;
   cursor: pointer;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.bottom-tabs button:hover {
+  transform: translateY(-1px);
+  background: #f8fafc;
 }
 
 .bottom-tabs button.active {
   color: #4f46e5;
   background: #eef2ff;
+}
+
+.tab-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 /* =========================================================

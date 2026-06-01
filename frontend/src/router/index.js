@@ -5,6 +5,8 @@ import Login from "../pages/Login.vue";
 import Dashboard from "../pages/Dashboard.vue";
 import Profile from "../pages/Profile.vue"
 import RoomView from "../pages/RoomView.vue"
+import Setting from "../pages/Setting.vue"
+
 const routes = [
   {
     path: "/",
@@ -30,6 +32,11 @@ const routes = [
     path: "/profile",
     name: "Profile",
     component: Profile,
+  },
+  {
+    path: "/settings",
+    name: "settings",
+    component: Setting,
   }
 ];
 

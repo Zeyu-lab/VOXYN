@@ -7,7 +7,7 @@
    - Load Supabase client
 ========================================================= */
 import { computed, onMounted, onBeforeUnmount, ref } from "vue"
-import { useRouter } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 import { supabase } from "../lib/supabaseClient"
 
 /* =========================================================
@@ -16,6 +16,7 @@ import { supabase } from "../lib/supabaseClient"
    - Control page navigation after login / logout / room actions
 ========================================================= */
 const router = useRouter()
+const route = useRoute()
 
 /* =========================================================
    SECTION 3: Auth State
@@ -53,20 +54,18 @@ const memberLimitOptions = [5, 8, 10]
 ========================================================= */
 const showMobileMenu = ref(false)
 const isHalfScreen = ref(false)
-
-let dashboardLargestWidth = 0
+const activeNavLabel = ref("Dashboard")
 
 function updateDashboardLayoutMode() {
   const currentWidth = window.innerWidth
 
-  if (currentWidth > dashboardLargestWidth) {
-    dashboardLargestWidth = currentWidth
-  }
-
-  const lostEnoughWidth = dashboardLargestWidth - currentWidth >= 180
-  const becameHalfLike = currentWidth <= dashboardLargestWidth * 0.92
-
-  isHalfScreen.value = lostEnoughWidth && becameHalfLike
+  /*
+    Match the RoomView sidebar behavior:
+    - Full desktop keeps the compact left rail.
+    - Half screen / smaller layouts hide the rail.
+    - The 3-dot topbar menu becomes the navigation entry point.
+  */
+  isHalfScreen.value = currentWidth <= 1320
 
   if (!isHalfScreen.value) {
     showMobileMenu.value = false
@@ -83,12 +82,12 @@ onBeforeUnmount(() => {
 })
 
 const navItems = [
-  "Dashboard",
-  "My Rooms",
-  "Voice Rooms",
-  "Games",
-  "Profile",
-  "Settings"
+  { label: "Dashboard", route: "/dashboard" },
+  { label: "My Rooms", section: "dashboard-my-rooms" },
+  { label: "Voice Rooms", section: "dashboard-room-blueprint" },
+  { label: "Games", section: "dashboard-room-blueprint" },
+  { label: "Profile", route: "/profile" },
+  { label: "Settings", route: "/settings" }
 ]
 
 function toggleMobileMenu() {
@@ -97,6 +96,51 @@ function toggleMobileMenu() {
 
 function closeMobileMenu() {
   showMobileMenu.value = false
+}
+
+function isNavItemActive(item) {
+  if (item.route === "/dashboard") {
+    return route.path === "/dashboard" && activeNavLabel.value === "Dashboard"
+  }
+
+  if (item.route) {
+    return route.path === item.route
+  }
+
+  return activeNavLabel.value === item.label
+}
+
+function scrollToDashboardSection(sectionId) {
+  const targetSection = document.getElementById(sectionId)
+
+  if (!targetSection) return
+
+  targetSection.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  })
+}
+
+function handleNavClick(item) {
+  closeMobileMenu()
+  activeNavLabel.value = item.label
+
+  if (item.route) {
+    if (item.route === "/dashboard" && route.path === "/dashboard") {
+      window.scrollTo({ top: 0, behavior: "smooth" })
+      return
+    }
+
+    if (route.path !== item.route) {
+      router.push(item.route)
+    }
+
+    return
+  }
+
+  if (item.section) {
+    scrollToDashboardSection(item.section)
+  }
 }
 
 /* =========================================================
@@ -448,14 +492,16 @@ async function signOut() {
       </div>
 
       <nav class="side-nav">
-        <a
+        <button
           v-for="item in navItems"
-          :key="item"
+          :key="item.label"
+          type="button"
           class="nav-item"
-          :class="{ active: item === 'Dashboard' }"
+          :class="{ active: isNavItemActive(item) }"
+          @click="handleNavClick(item)"
         >
-          {{ item }}
-        </a>
+          {{ item.label }}
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -535,15 +581,22 @@ async function signOut() {
            - Replaces sidebar on half screen / mobile
            - Shows listed functions after clicking 3 dots
       ================================================== -->
+      <div
+        v-if="showMobileMenu"
+        class="mobile-menu-backdrop"
+        @click="closeMobileMenu"
+      ></div>
+
       <div v-if="showMobileMenu" class="mobile-menu-panel">
         <button
           v-for="item in navItems"
-          :key="item"
+          :key="item.label"
+          type="button"
           class="mobile-menu-item"
-          :class="{ active: item === 'Dashboard' }"
-          @click="closeMobileMenu"
+          :class="{ active: isNavItemActive(item) }"
+          @click="handleNavClick(item)"
         >
-          {{ item }}
+          {{ item.label }}
         </button>
       </div>
 
@@ -806,7 +859,7 @@ async function signOut() {
           <!-- =============================================
                SECTION 13A: Recent Rooms Panel
           ============================================== -->
-          <div class="bottom-panel recent-panel">
+          <div id="dashboard-my-rooms" class="bottom-panel recent-panel">
             <div class="panel-header">
               <div>
                 <p class="panel-label">My Rooms</p>
@@ -874,7 +927,7 @@ async function signOut() {
                Purpose:
                - Show what happens after entering RoomView
           ============================================== -->
-          <div class="bottom-panel blueprint-panel">
+          <div id="dashboard-room-blueprint" class="bottom-panel blueprint-panel">
             <p class="panel-label">Room Blueprint</p>
             <h2>Inside each room</h2>
 
@@ -1051,6 +1104,7 @@ button:hover {
 
 .nav-item {
   padding: 15px 16px;
+  border: none;
   border-radius: 15px;
   color: #cbd5e1;
   cursor: pointer;
@@ -1319,6 +1373,10 @@ h1 {
    - Opens from topbar on half screen / mobile
 ========================================================= */
 .mobile-menu-panel {
+  display: none;
+}
+
+.mobile-menu-backdrop {
   display: none;
 }
 
@@ -2729,6 +2787,7 @@ button:disabled {
   place-items: center;
   text-align: center;
 
+  border: none;
   border-radius: 18px;
   color: #475569;
   background: transparent;
@@ -2821,6 +2880,10 @@ button:disabled {
   display: none;
 }
 
+.mobile-menu-backdrop {
+  display: none;
+}
+
 .dashboard-shell.half-screen-mode {
   padding-left: 0 !important;
 }
@@ -2860,11 +2923,19 @@ button:disabled {
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
 }
 
+.dashboard-shell.half-screen-mode .mobile-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: block;
+  background: transparent;
+}
+
 .dashboard-shell.half-screen-mode .mobile-menu-panel {
   position: absolute;
   top: 110px;
   left: 18px;
-  z-index: 50;
+  z-index: 60;
   width: 250px;
   padding: 12px;
 
