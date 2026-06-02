@@ -6,7 +6,7 @@
    - Load router
    - Load Supabase client
 ========================================================= */
-import { computed, onMounted, onBeforeUnmount, ref } from "vue"
+import { computed, onMounted, onBeforeUnmount, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase } from "../lib/supabaseClient"
 
@@ -28,9 +28,8 @@ const user = ref(null)
 const userEmail = ref("")
 const loading = ref(true)
 
-const profileAvatarUrl = ref("")
-const profileAvatarUpdatedAt = ref("")
 const avatarLoadFailed = ref(false)
+let dashboardAuthSubscription = null
 /* =========================================================
    SECTION 4: Room Form State
    Purpose:
@@ -75,10 +74,17 @@ function updateDashboardLayoutMode() {
 onMounted(() => {
   updateDashboardLayoutMode()
   window.addEventListener("resize", updateDashboardLayoutMode)
+  window.addEventListener("focus", handleDashboardFocusRefresh)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updateDashboardLayoutMode)
+  window.removeEventListener("focus", handleDashboardFocusRefresh)
+
+  if (dashboardAuthSubscription) {
+    dashboardAuthSubscription.unsubscribe()
+    dashboardAuthSubscription = null
+  }
 })
 
 const navItems = [
@@ -181,57 +187,152 @@ const latestRoomCode = computed(() => {
   return recentRooms.value[0].room_code
 })
 /* =========================================================
-   SECTION 6.5: Profile Avatar Display
+   SECTION 6.5: Profile Identity Display
    Purpose:
+   - Keep Dashboard identity synced with Profile metadata
    - Show uploaded avatar in Dashboard topbar
-   - Fall back to first email letter
+   - Fall back to profile name initial
 ========================================================= */
-const profileInitial = computed(() => {
-  if (userEmail.value) {
-    return userEmail.value.charAt(0).toUpperCase()
+const userMetadata = computed(() => {
+  return user.value?.user_metadata || {}
+})
+
+const displayName = computed(() => {
+  if (!user.value) return "Guest"
+
+  const metadataName =
+    userMetadata.value.display_name ||
+    userMetadata.value.username ||
+    userMetadata.value.name ||
+    userMetadata.value.full_name ||
+    userMetadata.value.preferred_name
+
+  if (metadataName) {
+    return String(metadataName).trim()
   }
 
-  return "U"
+  if (user.value.email) {
+    return user.value.email.split("@")[0]
+  }
+
+  return "Guest"
+})
+
+const profileInitial = computed(() => {
+  const cleanName = String(displayName.value || "").trim()
+
+  if (!cleanName) return "U"
+
+  return cleanName.charAt(0).toUpperCase()
 })
 
 const dashboardAvatarUrl = computed(() => {
-  if (!profileAvatarUrl.value || avatarLoadFailed.value) return ""
+  if (avatarLoadFailed.value) return ""
 
-  if (profileAvatarUpdatedAt.value) {
-    return `${profileAvatarUrl.value}?v=${profileAvatarUpdatedAt.value}`
-  }
+  const rawUrl =
+    userMetadata.value.avatar_url ||
+    userMetadata.value.avatarUrl ||
+    ""
 
-  return profileAvatarUrl.value
+  if (!rawUrl) return ""
+
+  const updatedAt = userMetadata.value.avatar_updated_at
+
+  if (!updatedAt) return rawUrl
+
+  const separator = rawUrl.includes("?") ? "&" : "?"
+
+  return `${rawUrl}${separator}v=${encodeURIComponent(updatedAt)}`
 })
-
 /* =========================================================
    SECTION 7: Auth Check
    Purpose:
    - When dashboard opens, check if user is logged in
-   - If not logged in, redirect to login page
+   - Refresh latest profile metadata from Supabase Auth
+   - Keep Dashboard avatar/name synced with Profile page
    - If logged in, load recent rooms
 ========================================================= */
 onMounted(async () => {
-  const { data } = await supabase.auth.getSession()
+  const { data: authListener } = supabase.auth.onAuthStateChange(
+    (event, session) => {
+      if (event === "SIGNED_OUT") {
+        user.value = null
+        userEmail.value = ""
+        avatarLoadFailed.value = false
+        return
+      }
 
-  if (!data.session) {
+      if (session?.user) {
+        user.value = session.user
+        userEmail.value = session.user.email || ""
+        avatarLoadFailed.value = false
+      }
+    }
+  )
+
+  dashboardAuthSubscription = authListener?.subscription || null
+
+  await loadDashboardPage()
+})
+
+watch(
+  () => route.path,
+  async (currentPath) => {
+    if (currentPath === "/dashboard") {
+      await refreshDashboardUser()
+    }
+  }
+)
+
+async function handleDashboardFocusRefresh() {
+  if (route.path !== "/dashboard") return
+
+  await refreshDashboardUser()
+}
+
+async function loadDashboardPage() {
+  loading.value = true
+
+  const isUserReady = await refreshDashboardUser()
+
+  if (!isUserReady) {
+    loading.value = false
     router.push("/login")
     return
   }
 
-  user.value = data.session.user
-  userEmail.value = data.session.user.email || ""
-
-  const metadata = data.session.user.user_metadata || {}
-
-  profileAvatarUrl.value = metadata.avatar_url || ""
-  profileAvatarUpdatedAt.value = metadata.avatar_updated_at || ""
-  avatarLoadFailed.value = false
-
   loading.value = false
 
   await loadRecentRooms()
-})
+}
+
+async function refreshDashboardUser() {
+  const { data: sessionData, error: sessionError } =
+    await supabase.auth.getSession()
+
+  if (sessionError || !sessionData.session) {
+    return false
+  }
+
+  /*
+    getSession can be stale after Profile updates.
+    getUser asks Supabase Auth for the latest user object,
+    so Dashboard receives the newest user_metadata.
+  */
+  const { data: userData, error: userError } =
+    await supabase.auth.getUser()
+
+  if (userError || !userData.user) {
+    user.value = sessionData.session.user
+  } else {
+    user.value = userData.user
+  }
+
+  userEmail.value = user.value.email || ""
+  avatarLoadFailed.value = false
+
+  return true
+}
 
 /* =========================================================
    SECTION 8: Room Code Helper
@@ -504,11 +605,24 @@ async function signOut() {
         </button>
       </nav>
 
-      <div class="sidebar-footer">
-        <p>Server Mode</p>
-        <strong>Local MVP</strong>
-        <span>Small rooms · 5-10 users</span>
-      </div>
+      <button
+        class="sidebar-footer sidebar-profile-btn"
+        type="button"
+        @click="router.push('/profile')"
+        :title="`Open ${displayName} profile`"
+      >
+        <img
+          v-if="dashboardAvatarUrl"
+          :src="dashboardAvatarUrl"
+          :alt="displayName"
+          class="sidebar-profile-img"
+          @error="avatarLoadFailed = true"
+        />
+
+        <span v-else class="sidebar-profile-initial">
+          {{ profileInitial }}
+        </span>
+      </button>
     </aside>
 
     <!-- ===================================================
@@ -518,13 +632,6 @@ async function signOut() {
     ==================================================== -->
     <section class="main-area">
 
-      <!-- =================================================
-           SECTION 4: Topbar
-           Purpose:
-           - Full screen: title + user actions
-           - Half screen: sidebar becomes 3-dot menu
-           - Keep title and actions aligned in one row
-      ================================================== -->
       <!-- =================================================
           SECTION 4: Topbar
           Purpose:
@@ -559,7 +666,7 @@ async function signOut() {
             <img
               v-if="dashboardAvatarUrl"
               :src="dashboardAvatarUrl"
-              alt="Profile avatar"
+              :alt="displayName"
               class="profile-circle-img"
               @error="avatarLoadFailed = true"
             />
@@ -2976,6 +3083,44 @@ button:disabled {
     right: 14px;
     width: auto;
   }
+}
+
+
+/* =========================================================
+   SECTION 24.5: Synced Sidebar Profile Avatar
+   Purpose:
+   - Replace hardcoded sidebar Z with real Profile metadata
+   - Use same avatar / initial source as Dashboard topbar
+========================================================= */
+.sidebar-profile-btn {
+  border: none;
+  cursor: pointer;
+  overflow: hidden;
+  color: white;
+}
+
+.sidebar-profile-img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+}
+
+.sidebar-profile-initial {
+  color: white;
+  font-size: 18px;
+  font-weight: 950;
+  line-height: 1;
+}
+
+.sidebar-profile-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.28);
+}
+
+.sidebar-footer strong::before {
+  content: none;
 }
 
 </style>

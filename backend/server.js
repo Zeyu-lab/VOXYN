@@ -113,73 +113,93 @@ io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
   /* =====================================================
-     SECTION 6.1: Join Room
-     Purpose:
-     - User joins a room by roomCode
+    SECTION 6.1: Join Room
+    Purpose:
+    - User joins a room by roomCode
+    - Save frontend profile identity into socket room users
   ===================================================== */
   socket.on("room:join", (payload, callback) => {
     try {
-      const roomCode = String(payload?.roomCode || "").trim();
-      const username = String(payload?.username || "Guest").trim();
+      const roomCode = String(payload?.roomCode || "").trim()
+      const username = String(payload?.username || "Guest").trim()
+      const userId = String(payload?.userId || "").trim()
+      const email = String(payload?.email || "").trim()
+      const avatarUrl = String(payload?.avatarUrl || "").trim()
+
+      const initial = String(
+        payload?.initial || username.charAt(0) || "U"
+      )
+        .trim()
+        .charAt(0)
+        .toUpperCase()
 
       if (!roomCode) {
         if (callback) {
           callback({
             ok: false,
             error: "Room code is required.",
-          });
+          })
         }
 
-        return;
+        return
       }
 
-      const room = getOrCreateRoom(roomCode);
+      const room = getOrCreateRoom(roomCode)
 
-      socket.join(roomCode);
+      socket.join(roomCode)
 
-      socket.data.roomCode = roomCode;
-      socket.data.username = username;
+      socket.data.roomCode = roomCode
+      socket.data.userId = userId
+      socket.data.username = username
+      socket.data.email = email
+      socket.data.avatarUrl = avatarUrl
+      socket.data.initial = initial
 
       room.users.set(socket.id, {
         socketId: socket.id,
+        userId,
         username,
+        email,
+        avatarUrl,
+        initial,
         joinedAt: Date.now(),
-      });
+      })
 
-      socket.emit("room:history", room.messages);
+      socket.emit("room:history", room.messages)
 
-      io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
+      io.to(roomCode).emit("room:users", getRoomUsers(roomCode))
 
       socket.to(roomCode).emit("room:system", {
         id: crypto.randomUUID(),
         type: "system",
         message: `${username} joined the room.`,
         createdAt: Date.now(),
-      });
+      })
 
       if (callback) {
         callback({
           ok: true,
           roomCode,
-        });
+        })
       }
     } catch (error) {
-      console.error("room:join error:", error);
+      console.error("room:join error:", error)
 
       if (callback) {
         callback({
           ok: false,
           error: "Failed to join room.",
-        });
+        })
       }
     }
-  });
+  })
 
   /* =====================================================
-     SECTION 6.2: Send Chat Message
-     Purpose:
-     - Receive message from one user
-     - Broadcast to everyone in the room
+    SECTION 6.2: Send Chat Message
+    Purpose:
+    - Receive message from one user
+    - Broadcast to everyone in the room
+    - Keep chat identity synced with profile avatar/name
   ===================================================== */
   socket.on("chat:send", (payload, callback) => {
     try {
@@ -190,6 +210,21 @@ io.on("connection", (socket) => {
       const username = String(
         payload?.username || socket.data.username || "Guest"
       ).trim();
+
+      const userId = String(
+        payload?.userId || socket.data.userId || ""
+      ).trim();
+
+      const avatarUrl = String(
+        payload?.avatarUrl || socket.data.avatarUrl || ""
+      ).trim();
+
+      const initial = String(
+        payload?.initial || socket.data.initial || username.charAt(0) || "U"
+      )
+        .trim()
+        .charAt(0)
+        .toUpperCase();
 
       const message = String(payload?.message || "").trim();
 
@@ -221,7 +256,10 @@ io.on("connection", (socket) => {
         id: crypto.randomUUID(),
         type: "chat",
         socketId: socket.id,
+        userId,
         username,
+        avatarUrl,
+        initial,
         message,
         createdAt: Date.now(),
       };
@@ -250,7 +288,6 @@ io.on("connection", (socket) => {
       }
     }
   });
-
   /* =====================================================
      SECTION 6.3: Leave Room Manually
      Purpose:
@@ -284,7 +321,11 @@ io.on("connection", (socket) => {
     cleanEmptyRoom(roomCode);
 
     socket.data.roomCode = null;
+    socket.data.userId = null;
     socket.data.username = null;
+    socket.data.email = null;
+    socket.data.avatarUrl = null;
+    socket.data.initial = null;
   });
 
   /* =====================================================

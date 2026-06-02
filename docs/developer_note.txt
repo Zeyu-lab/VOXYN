@@ -51,3 +51,12 @@ v0.45 Update
 - Added mobile menu backdrop close behavior
 - Prepared route entry for Profile and Settings
 - Reduced inconsistency between Dashboard and RoomView layouts
+
+v0.46 update
+- Fixed Profile metadata synchronization across VOXYN
+- Standardized Supabase user metadata keys for display name, status message, and avatar
+- Updated Dashboard to read the latest Profile identity from Supabase Auth
+- Removed hardcoded profile initials such as Z / U from identity display areas
+- Added avatar cache-busting with avatar_updated_at
+- Improved Profile avatar upload flow and metadata update order
+- Prepared identity sync foundation for RoomView, backend socket users, and chat avatars

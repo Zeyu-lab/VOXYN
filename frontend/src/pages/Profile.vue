@@ -251,6 +251,9 @@ const avatarDisplayUrl = computed(() => {
 
 /* =================================================
    SECTION 4: Load Current User
+   Purpose:
+   - Load latest user profile from Supabase Auth
+   - Use getUser instead of getSession to avoid stale metadata
 ================================================== */
 onMounted(() => {
   loadProfile()
@@ -260,20 +263,14 @@ async function loadProfile() {
   loading.value = true
 
   try {
-    const { data, error } = await supabase.auth.getSession()
+    const { data, error } = await supabase.auth.getUser()
 
-    if (error) {
-      console.error("Profile session error:", error)
-      return
-    }
-
-    const user = data?.session?.user
-
-    if (!user) {
+    if (error || !data?.user) {
       router.push("/login")
       return
     }
 
+    const user = data.user
     const metadata = user.user_metadata || {}
 
     userEmail.value = user.email || ""
@@ -303,9 +300,11 @@ async function loadProfile() {
    - User selects local image
    - Upload to Supabase Storage bucket: avatars
    - Save public avatar URL into auth metadata
+   - Keep Dashboard/Profile avatar keys consistent
 ================================================== */
 async function handleAvatarUpload(event) {
   avatarError.value = ""
+  saveMessage.value = ""
 
   const file = event.target.files?.[0]
 
@@ -342,6 +341,7 @@ async function handleAvatarUpload(event) {
 
     const user = data.user
     const metadata = user.user_metadata || {}
+
     const oldAvatarPath = metadata.avatar_path || ""
     const filePath = `${user.id}/avatar.${fileExt}`
 
@@ -356,24 +356,12 @@ async function handleAvatarUpload(event) {
     if (uploadError) {
       throw uploadError
     }
-    if (oldAvatarPath && oldAvatarPath !== filePath) {
-        const { error: removeError } = await supabase.storage
-            .from("avatars")
-            .remove([oldAvatarPath])
-
-        if (removeError) {
-            console.warn("Old avatar remove failed:", removeError)
-        }
-    }
-
-avatarUrl.value = publicUrl
-avatarUpdatedAt.value = updatedAt
 
     const { data: publicUrlData } = supabase.storage
       .from("avatars")
       .getPublicUrl(filePath)
 
-    const publicUrl = publicUrlData.publicUrl
+    const publicUrl = publicUrlData?.publicUrl || ""
     const updatedAt = Date.now().toString()
 
     const { error: updateError } = await supabase.auth.updateUser({
@@ -391,17 +379,36 @@ avatarUpdatedAt.value = updatedAt
 
     avatarUrl.value = publicUrl
     avatarUpdatedAt.value = updatedAt
+
+    if (oldAvatarPath && oldAvatarPath !== filePath) {
+      const { error: removeError } = await supabase.storage
+        .from("avatars")
+        .remove([oldAvatarPath])
+
+      if (removeError) {
+        console.warn("Old avatar remove failed:", removeError)
+      }
+    }
+
+    saveMessage.value = "Avatar updated."
   } catch (err) {
     console.error("Avatar upload failed:", err)
     avatarError.value = "Avatar upload failed. Check bucket policy or try again."
   } finally {
     uploadingAvatar.value = false
     event.target.value = ""
+
+    setTimeout(() => {
+      saveMessage.value = ""
+    }, 2200)
   }
 }
 
 /* =================================================
    SECTION 6: Save Profile Metadata
+   Purpose:
+   - Save display name and status message
+   - Keep metadata keys aligned with Dashboard / RoomView
 ================================================== */
 async function saveProfile() {
   saveMessage.value = ""
@@ -416,17 +423,29 @@ async function saveProfile() {
 
     const metadata = data.user.user_metadata || {}
 
+    const cleanDisplayName =
+      displayName.value.trim() ||
+      userEmail.value.split("@")[0] ||
+      "VOXYN User"
+
+    const cleanStatusMessage =
+      statusMessage.value.trim() ||
+      "Building VOXYN..."
+
     const { error: updateError } = await supabase.auth.updateUser({
       data: {
         ...metadata,
-        display_name: displayName.value,
-        status_message: statusMessage.value
+        display_name: cleanDisplayName,
+        status_message: cleanStatusMessage
       }
     })
 
     if (updateError) {
       throw updateError
     }
+
+    displayName.value = cleanDisplayName
+    statusMessage.value = cleanStatusMessage
 
     saveMessage.value = "Profile saved."
   } catch (err) {
@@ -440,7 +459,6 @@ async function saveProfile() {
     }, 2200)
   }
 }
-
 /* =================================================
    SECTION 7: Navigation Actions
 ================================================== */

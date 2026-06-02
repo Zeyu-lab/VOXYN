@@ -82,6 +82,7 @@ const tabs = [
     icon: "⚙"
   }
 ]
+
 const roomRailItems = [
   {
     label: "Dashboard",
@@ -134,6 +135,8 @@ const chatMessages = ref([
   {
     id: "local-system-ready",
     sender: "System",
+    senderInitial: "S",
+    avatarUrl: "",
     text: "Room workspace is ready.",
     time: "Now",
     type: "system"
@@ -144,6 +147,7 @@ const chatMessages = ref([
    SECTION 6: Computed Room Data
    Purpose:
    - Format room title, owner, members and progress
+   - Keep Profile identity synced inside RoomView
 ========================================================= */
 const roomTitle = computed(() => {
   return room.value?.room_name || "Untitled Room"
@@ -170,15 +174,112 @@ const memberProgressWidth = computed(() => {
   return `${Math.min((memberCount.value / maxMembers.value) * 100, 100)}%`
 })
 
+const userMetadata = computed(() => {
+  return user.value?.user_metadata || {}
+})
+
 const displayName = computed(() => {
   if (!user.value) return "Guest"
 
-  return (
-    user.value.user_metadata?.display_name ||
-    user.value.email ||
-    "Guest"
-  )
+  const metadataName =
+    userMetadata.value.display_name ||
+    userMetadata.value.username ||
+    userMetadata.value.name ||
+    userMetadata.value.full_name ||
+    userMetadata.value.preferred_name
+
+  if (metadataName) {
+    return String(metadataName).trim()
+  }
+
+  if (user.value.email) {
+    return user.value.email.split("@")[0]
+  }
+
+  return "Guest"
 })
+
+const avatarUrl = computed(() => {
+  const rawUrl =
+    userMetadata.value.avatar_url ||
+    userMetadata.value.avatarUrl ||
+    ""
+
+  if (!rawUrl) return ""
+
+  const updatedAt = userMetadata.value.avatar_updated_at
+
+  if (!updatedAt) return rawUrl
+
+  const separator = rawUrl.includes("?") ? "&" : "?"
+
+  return `${rawUrl}${separator}v=${encodeURIComponent(updatedAt)}`
+})
+
+const profileInitial = computed(() => {
+  return getUserInitial(displayName.value)
+})
+
+const visibleRoomUsers = computed(() => {
+  const liveUsers = Array.isArray(onlineUsers.value)
+    ? onlineUsers.value
+        .filter(Boolean)
+        .map((onlineUser, index) => {
+          const username =
+            onlineUser.username ||
+            onlineUser.displayName ||
+            onlineUser.name ||
+            "Guest"
+
+          return {
+            id:
+              onlineUser.socketId ||
+              onlineUser.userId ||
+              onlineUser.id ||
+              `online-user-${index}`,
+            socketId: onlineUser.socketId,
+            userId: onlineUser.userId,
+            username,
+            avatarUrl:
+              onlineUser.avatarUrl ||
+              onlineUser.avatar_url ||
+              "",
+            initial:
+              onlineUser.initial ||
+              getUserInitial(username),
+            isOwner:
+              onlineUser.userId &&
+              room.value?.owner_id &&
+              onlineUser.userId === room.value.owner_id
+          }
+        })
+    : []
+
+  if (liveUsers.length) return liveUsers
+
+  if (user.value) {
+    return [
+      {
+        id: user.value.id,
+        userId: user.value.id,
+        username: displayName.value,
+        avatarUrl: avatarUrl.value,
+        initial: profileInitial.value,
+        isOwner: isOwner.value
+      }
+    ]
+  }
+
+  return []
+})
+
+function getUserInitial(name) {
+  const cleanName = String(name || "").trim()
+
+  if (!cleanName) return "U"
+
+  return cleanName.charAt(0).toUpperCase()
+}
 
 /* =========================================================
    SECTION 7: Page Init
@@ -200,24 +301,25 @@ async function loadRoomPage() {
   loading.value = true
   errorMessage.value = ""
 
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+  const { data: sessionData, error: sessionError } =
+    await supabase.auth.getSession()
 
-    if (sessionError) {
-      console.error("Session error:", sessionError.message)
+  if (sessionError) {
+    console.error("Session error:", sessionError.message)
 
-      localStorage.clear()
-      sessionStorage.clear()
+    localStorage.clear()
+    sessionStorage.clear()
 
-      loading.value = false
-      router.push("/login")
-      return
-    }
+    loading.value = false
+    router.push("/login")
+    return
+  }
 
-    if (!sessionData.session) {
-      loading.value = false
-      router.push("/login")
-      return
-    }
+  if (!sessionData.session) {
+    loading.value = false
+    router.push("/login")
+    return
+  }
 
   user.value = sessionData.session.user
 
@@ -422,11 +524,16 @@ function joinSocketRoom() {
     "room:join",
     {
       roomCode: roomCode.value,
-      username: displayName.value
+      userId: user.value?.id || "",
+      username: displayName.value,
+      avatarUrl: avatarUrl.value,
+      initial: profileInitial.value,
+      email: user.value?.email || ""
     },
     (response) => {
       if (!response?.ok) {
-        errorMessage.value = response?.error || "Could not connect to room chat."
+        errorMessage.value =
+          response?.error || "Could not connect to room chat."
       }
     }
   )
@@ -441,6 +548,8 @@ function handleRoomHistory(oldMessages) {
     {
       id: "local-system-ready",
       sender: "System",
+      senderInitial: "S",
+      avatarUrl: "",
       text: "Room workspace is ready.",
       time: "Now",
       type: "system"
@@ -501,7 +610,10 @@ function sendChatMessage() {
     "chat:send",
     {
       roomCode: roomCode.value,
+      userId: user.value?.id || "",
       username: displayName.value,
+      avatarUrl: avatarUrl.value,
+      initial: profileInitial.value,
       message: text
     },
     (response) => {
@@ -516,10 +628,13 @@ function sendChatMessage() {
 
 function normalizeSocketMessage(item) {
   const isSystem = item?.type === "system"
+  const sender = isSystem ? "System" : item?.username || "Guest"
 
   return {
     id: item?.id || `${Date.now()}-${Math.random()}`,
-    sender: isSystem ? "System" : item?.username || "Guest",
+    sender,
+    senderInitial: getUserInitial(sender),
+    avatarUrl: item?.avatarUrl || item?.avatar_url || "",
     text: item?.message || "",
     time: formatChatTime(item?.createdAt),
     type: isSystem ? "system" : "user",
@@ -561,8 +676,20 @@ function formatChatTime(timestamp) {
         </button>
       </nav>
 
-      <button class="rail-user" @click="router.push('/profile')">
-        {{ user?.email?.charAt(0)?.toUpperCase() || "U" }}
+      <button
+        class="rail-user"
+        :title="displayName"
+        @click="router.push('/profile')"
+      >
+        <img
+          v-if="avatarUrl"
+          class="rail-user-img"
+          :src="avatarUrl"
+          :alt="displayName"
+        />
+        <template v-else>
+          {{ profileInitial }}
+        </template>
         <span></span>
       </button>
     </aside>
@@ -729,12 +856,21 @@ function formatChatTime(timestamp) {
 
               <div class="member-avatars">
                 <span
-                  v-for="member in members.slice(0, 4)"
+                  v-for="member in visibleRoomUsers.slice(0, 4)"
                   :key="member.id"
                   class="avatar"
-                  :class="{ owner: member.member_role === 'owner' }"
+                  :class="{ owner: member.isOwner }"
+                  :title="member.username"
                 >
-                  {{ member.member_role === "owner" ? "Z" : "U" }}
+                  <img
+                    v-if="member.avatarUrl"
+                    class="avatar-img"
+                    :src="member.avatarUrl"
+                    :alt="member.username"
+                  />
+                  <template v-else>
+                    {{ member.initial }}
+                  </template>
                 </span>
 
                 <span class="avatar add">+</span>
@@ -792,7 +928,15 @@ function formatChatTime(timestamp) {
                 :class="{ system: message.type === 'system' }"
               >
                 <div class="chat-avatar">
-                  {{ message.sender.charAt(0) }}
+                  <img
+                    v-if="message.avatarUrl"
+                    class="chat-avatar-img"
+                    :src="message.avatarUrl"
+                    :alt="message.sender"
+                  />
+                  <template v-else>
+                    {{ message.senderInitial || message.sender.charAt(0) }}
+                  </template>
                 </div>
 
                 <div class="chat-bubble">
@@ -1001,7 +1145,12 @@ function formatChatTime(timestamp) {
 .rail-user {
   width: 58px;
   height: 58px;
+  min-width: 58px;
+  min-height: 58px;
+  max-width: 58px;
+  max-height: 58px;
   margin-top: auto;
+  padding: 0;
 
   position: relative;
 
@@ -1010,6 +1159,7 @@ function formatChatTime(timestamp) {
 
   border: none;
   border-radius: 20px;
+  overflow: hidden;
   cursor: pointer;
 
   color: white;
@@ -1020,10 +1170,21 @@ function formatChatTime(timestamp) {
   font-weight: 950;
 }
 
-.rail-user span {
+.rail-user-img {
+  width: 100%;
+  height: 100%;
+  max-width: 58px;
+  max-height: 58px;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.rail-user > span {
   position: absolute;
   right: 4px;
   bottom: 4px;
+  z-index: 2;
 
   width: 9px;
   height: 9px;
@@ -1033,6 +1194,29 @@ function formatChatTime(timestamp) {
   border: 2px solid white;
 }
 
+.avatar {
+  overflow: hidden;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.chat-avatar {
+  overflow: hidden;
+}
+
+.chat-avatar-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
 /* =========================================================
    SECTION 3: Header
 ========================================================= */
