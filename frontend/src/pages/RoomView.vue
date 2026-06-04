@@ -123,6 +123,45 @@ const memberLimitOptions = [5, 8, 10]
 const selectedTab = ref("Game")
 const selectedVoiceChannel = ref("Lobby")
 
+const defaultVoiceChannel = "Lobby"
+const hasAutoJoinedDefaultVoice = ref(false)
+const hasManuallyLeftVoice = ref(false)
+const voiceJoinLoading = ref(false)
+const voiceLeaveLoading = ref(false)
+const voiceStatusMessage = ref("")
+
+const hasJoinedVoice = computed(() => {
+  return (
+    isVoiceReady.value &&
+    Boolean(localStream.value) &&
+    !hasManuallyLeftVoice.value
+  )
+})
+
+const voicePanelStatus = computed(() => {
+  if (voiceJoinLoading.value) {
+    return `Connecting to ${selectedVoiceChannel.value}...`
+  }
+
+  if (voiceLeaveLoading.value) {
+    return "Leaving voice channel..."
+  }
+
+  if (hasJoinedVoice.value) {
+    return `Connected to ${selectedVoiceChannel.value}`
+  }
+
+  if (hasManuallyLeftVoice.value) {
+    return `You left ${selectedVoiceChannel.value}. Click Enable Voice to rejoin.`
+  }
+
+  if (voiceStatusMessage.value) {
+    return voiceStatusMessage.value
+  }
+
+  return `You are in ${selectedVoiceChannel.value}. Click Enable Voice to talk.`
+})
+
 const tabs = [
   {
     label: "Game",
@@ -183,7 +222,7 @@ const voiceChannels = computed(() => {
   return voiceChannelNames.map((name) => {
     const usersInChannel = onlineUsers.value
       .filter((onlineUser) => {
-        return (onlineUser.voiceChannel || "Lobby") === name
+        return onlineUser.voiceChannel === name
       })
       .map((onlineUser, index) => {
         return normalizeVoiceUser(onlineUser, index)
@@ -200,7 +239,7 @@ const voiceChannels = computed(() => {
 const currentVoiceMembers = computed(() => {
   return onlineUsers.value
     .filter((onlineUser) => {
-      return (onlineUser.voiceChannel || "Lobby") === selectedVoiceChannel.value
+      return onlineUser.voiceChannel === selectedVoiceChannel.value
     })
     .map((onlineUser, index) => {
       return normalizeVoiceUser(onlineUser, index)
@@ -226,65 +265,217 @@ const chatMessages = ref([
    - Start local microphone before entering voice state
    - Sync mic / headphone / speaking state with backend
    - Start real WebRTC peer connection with users in same channel
+   - Auto-connect default Lobby after room socket is ready
 ========================================================= */
-async function joinVoiceChannel(channelName) {
-  selectedVoiceChannel.value = channelName
+async function joinVoiceChannel(channelName = defaultVoiceChannel, options = {}) {
+  const targetChannel = channelName || defaultVoiceChannel
+
+  selectedVoiceChannel.value = targetChannel
+  hasManuallyLeftVoice.value = false
   errorMessage.value = ""
+  voiceStatusMessage.value = ""
 
-  const stream = await ensureVoiceReady()
+  if (voiceJoinLoading.value) return
 
-  if (!stream) return
+  voiceJoinLoading.value = true
 
-  if (!socket.connected) {
-    errorMessage.value = "Voice server is not connected."
-    return
-  }
+  try {
+    const stream = await ensureVoiceReady(options)
 
-  socket.emit(
-    "voice:join",
-    {
-      roomCode: roomCode.value,
-      voiceChannel: channelName,
-      userId: user.value?.id || "",
-      username: displayName.value,
-      avatarUrl: avatarUrl.value,
-      initial: profileInitial.value,
-
-      micOn: isMicOn.value,
-      deafened: isDeafened.value,
-      speaking: isSpeaking.value,
-
-      isMicOn: isMicOn.value,
-      isDeafened: isDeafened.value,
-      isSpeaking: isSpeaking.value
-    },
-    (response) => {
-      if (!response?.ok) {
-        errorMessage.value =
-          response?.error || "Could not join voice channel."
-        return
-      }
-
-      emitVoiceState()
-      syncCurrentVoicePeers()
+    if (!stream) {
+      voiceStatusMessage.value =
+        "Voice is not enabled yet. Click Enable Voice or select a channel."
+      return
     }
-  )
+
+    if (!socket.connected) {
+      errorMessage.value = "Voice server is not connected."
+      voiceStatusMessage.value = "Voice server is not connected."
+      return
+    }
+
+    socket.emit(
+      "voice:join",
+      {
+        roomCode: roomCode.value,
+        voiceChannel: targetChannel,
+        userId: user.value?.id || "",
+        username: displayName.value,
+        avatarUrl: avatarUrl.value,
+        initial: profileInitial.value,
+
+        micOn: isMicOn.value,
+        deafened: isDeafened.value,
+        speaking: isMicOn.value && !isDeafened.value && isSpeaking.value,
+
+        isMicOn: isMicOn.value,
+        isDeafened: isDeafened.value,
+        isSpeaking: isMicOn.value && !isDeafened.value && isSpeaking.value
+      },
+      (response) => {
+        if (!response?.ok) {
+          errorMessage.value =
+            response?.error || "Could not join voice channel."
+
+          voiceStatusMessage.value =
+            response?.error || "Could not join voice channel."
+
+          return
+        }
+        hasAutoJoinedDefaultVoice.value = true
+        hasManuallyLeftVoice.value = false
+        voiceStatusMessage.value = `Connected to ${targetChannel}`
+
+        emitVoiceState()
+        syncCurrentVoicePeers()
+      }
+    )
+  } catch (error) {
+    console.error("VOXYN voice: failed to join channel", error)
+
+    if (!options.silentFail) {
+      errorMessage.value = "Microphone could not start."
+    }
+
+    voiceStatusMessage.value =
+      "Microphone permission is needed before you can talk."
+  } finally {
+    voiceJoinLoading.value = false
+  }
 }
 
-async function ensureVoiceReady() {
+function clearCurrentUserFromVoiceList() {
+  onlineUsers.value = onlineUsers.value.map((onlineUser) => {
+    const isCurrent =
+      onlineUser.socketId === socket.id ||
+      onlineUser.userId === user.value?.id
+
+    if (!isCurrent) {
+      return onlineUser
+    }
+
+    return {
+      ...onlineUser,
+      voiceChannel: null,
+      micOn: false,
+      deafened: false,
+      speaking: false,
+      isMicOn: false,
+      isDeafened: false,
+      isSpeaking: false
+    }
+  })
+}
+
+async function leaveVoiceChannel() {
+  if (voiceLeaveLoading.value) return
+
+  voiceLeaveLoading.value = true
+  errorMessage.value = ""
+
+  const previousChannel = selectedVoiceChannel.value || defaultVoiceChannel
+
+  try {
+    cleanupVoiceRoom()
+
+    hasManuallyLeftVoice.value = true
+    hasAutoJoinedDefaultVoice.value = true
+
+    clearCurrentUserFromVoiceList()
+
+    voiceStatusMessage.value =
+      `You left ${previousChannel}. Click Enable Voice to rejoin.`
+
+    if (!socket.connected) {
+      return
+    }
+
+    socket.emit(
+      "voice:leave",
+      {
+        roomCode: roomCode.value,
+        previousVoiceChannel: previousChannel,
+
+        userId: user.value?.id || "",
+        username: displayName.value,
+        avatarUrl: avatarUrl.value,
+        initial: profileInitial.value,
+
+        voiceChannel: null,
+
+        micOn: false,
+        deafened: false,
+        speaking: false,
+
+        isMicOn: false,
+        isDeafened: false,
+        isSpeaking: false
+      },
+      (response) => {
+        if (!response?.ok) {
+          console.warn("VOXYN voice: leave failed", response)
+
+          errorMessage.value =
+            response?.error || "Could not leave voice channel."
+        }
+      }
+    )
+  } catch (error) {
+    console.error("VOXYN voice: failed to leave channel", error)
+    errorMessage.value = "Could not leave voice channel."
+  } finally {
+    voiceLeaveLoading.value = false
+  }
+}
+
+async function autoJoinDefaultVoiceChannel() {
+  if (hasAutoJoinedDefaultVoice.value) return
+  if (hasManuallyLeftVoice.value) return
+  if (!socket.connected) return
+  if (!user.value) return
+
+  hasAutoJoinedDefaultVoice.value = true
+  selectedVoiceChannel.value = defaultVoiceChannel
+
+  await joinVoiceChannel(defaultVoiceChannel, {
+    silentFail: true
+  })
+}
+
+async function ensureVoiceReady(options = {}) {
   if (isVoiceReady.value && localStream.value) {
     return localStream.value
   }
 
-  const stream = await startLocalAudio()
+  try {
+    const stream = await startLocalAudio()
 
-  if (!stream) {
-    errorMessage.value = voiceError.value || "Microphone could not start."
+    if (!stream) {
+      if (!options.silentFail) {
+        errorMessage.value = voiceError.value || "Microphone could not start."
+      }
+
+      voiceStatusMessage.value =
+        voiceError.value || "Microphone permission is required."
+
+      return null
+    }
+
+    return stream
+  } catch (error) {
+    console.error("VOXYN voice: microphone start failed", error)
+
+    if (!options.silentFail) {
+      errorMessage.value = "Microphone could not start."
+    }
+
+    voiceStatusMessage.value =
+      "Microphone permission is required before voice can start."
+
     return null
   }
-
-  return stream
 }
+
 function emitVoiceState() {
   if (!socket.connected || !roomCode.value || !user.value) return
 
@@ -334,7 +525,6 @@ async function syncCurrentVoicePeers() {
   })
 }
 
-
 async function toggleRoomMicrophone() {
   errorMessage.value = ""
 
@@ -373,30 +563,33 @@ function normalizeVoiceUser(onlineUser, index = 0) {
       onlineUser.userId ||
       onlineUser.id ||
       `voice-user-${index}`,
+
     socketId: onlineUser.socketId,
     userId: onlineUser.userId,
     username,
+
     avatarUrl:
       onlineUser.avatarUrl ||
       onlineUser.avatar_url ||
       "",
+
     initial:
       onlineUser.initial ||
       getUserInitial(username),
+
     voiceChannel:
-      onlineUser.voiceChannel ||
-      "Lobby",
+      onlineUser.voiceChannel || "",
 
     micOn: isCurrentUser
-      ? isMicOn.value
-      : onlineUser.micOn !== false && onlineUser.isMicOn !== false,
+      ? hasJoinedVoice.value && isMicOn.value
+      : onlineUser.micOn === true || onlineUser.isMicOn === true,
 
     deafened: isCurrentUser
-      ? isDeafened.value
+      ? hasJoinedVoice.value && isDeafened.value
       : Boolean(onlineUser.deafened || onlineUser.isDeafened),
 
     speaking: isCurrentUser
-      ? isMicOn.value && !isDeafened.value && isSpeaking.value
+      ? hasJoinedVoice.value && isMicOn.value && !isDeafened.value && isSpeaking.value
       : Boolean(onlineUser.speaking || onlineUser.isSpeaking)
   }
 }
@@ -429,10 +622,10 @@ function getVoiceUserSpeaking(voiceUser) {
 
 function getVoiceUserMicOn(voiceUser) {
   if (isCurrentVoiceUser(voiceUser)) {
-    return isMicOn.value
+    return hasJoinedVoice.value && isMicOn.value
   }
 
-  return voiceUser?.micOn !== false && voiceUser?.isMicOn !== false
+  return voiceUser?.micOn === true || voiceUser?.isMicOn === true
 }
 
 function getVoiceUserDeafened(voiceUser) {
@@ -450,6 +643,7 @@ watch(
     syncCurrentVoicePeers()
   }
 )
+
 /* =========================================================
    SECTION 6: Computed Room Data
    Purpose:
@@ -608,7 +802,14 @@ onBeforeUnmount(() => {
 async function loadRoomPage() {
   loading.value = true
   errorMessage.value = ""
-
+  voiceStatusMessage.value = ""
+  hasAutoJoinedDefaultVoice.value = false
+  hasManuallyLeftVoice.value = false
+  voiceJoinLoading.value = false
+  voiceLeaveLoading.value = false
+  voiceStatusMessage.value = ""
+  selectedVoiceChannel.value = defaultVoiceChannel
+  
   const { data: sessionData, error: sessionError } =
     await supabase.auth.getSession()
 
@@ -909,16 +1110,30 @@ function joinSocketRoom() {
       avatarUrl: avatarUrl.value,
       initial: profileInitial.value,
       email: user.value?.email || "",
-      voiceChannel: selectedVoiceChannel.value
+
+      voiceChannel: selectedVoiceChannel.value || defaultVoiceChannel,
+
+      micOn: false,
+      deafened: false,
+      speaking: false,
+
+      isMicOn: false,
+      isDeafened: false,
+      isSpeaking: false
     },
     (response) => {
       if (!response?.ok) {
         errorMessage.value =
           response?.error || "Could not connect to room chat."
+        return
       }
+
+      voiceStatusMessage.value =
+        `You are in ${selectedVoiceChannel.value}. Click Enable Voice to talk.`
     }
   )
 }
+
 
 function handleRoomHistory(oldMessages) {
   const normalizedMessages = Array.isArray(oldMessages)
@@ -968,6 +1183,9 @@ function leaveSocketRoom(disconnectSocket = false) {
 
   onlineUsers.value = []
   socketConnected.value = false
+  voiceJoinLoading.value = false
+  voiceStatusMessage.value = ""
+  selectedVoiceChannel.value = defaultVoiceChannel
 
   if (disconnectSocket) {
     socket.disconnect()
@@ -1271,24 +1489,43 @@ function formatChatTime(timestamp) {
 
               <div class="voice-control-panel">
                 <p>
-                  {{ isVoiceReady ? `Connected to ${selectedVoiceChannel}` : "Join a channel to start voice." }}
+                  {{ voicePanelStatus }}
                 </p>
 
                 <div class="voice-control-row">
                   <button
                     class="voice-control-btn"
-                    :class="{ active: isMicOn }"
-                    @click="toggleRoomMicrophone"
+                    :class="{ active: hasJoinedVoice }"
+                    :disabled="voiceJoinLoading || voiceLeaveLoading"
+                    @click="joinVoiceChannel(selectedVoiceChannel)"
                   >
-                    {{ isMicOn ? "Mic On" : "Muted" }}
+                    {{ hasJoinedVoice ? "Voice Ready" : "Enable Voice" }}
                   </button>
 
                   <button
                     class="voice-control-btn"
-                    :class="{ active: !isDeafened }"
+                    :class="{ active: hasJoinedVoice && isMicOn }"
+                    :disabled="!hasJoinedVoice || voiceJoinLoading || voiceLeaveLoading"
+                    @click="toggleRoomMicrophone"
+                  >
+                    {{ hasJoinedVoice && isMicOn ? "Mic On" : "Muted" }}
+                  </button>
+
+                  <button
+                    class="voice-control-btn"
+                    :class="{ active: hasJoinedVoice && !isDeafened }"
+                    :disabled="!hasJoinedVoice || voiceJoinLoading || voiceLeaveLoading"
                     @click="toggleRoomHeadphones"
                   >
-                    {{ isDeafened ? "Deafened" : "Listening" }}
+                    {{ hasJoinedVoice && isDeafened ? "Deafened" : "Listening" }}
+                  </button>
+
+                  <button
+                    class="voice-control-btn leave"
+                    :disabled="!hasJoinedVoice || voiceJoinLoading || voiceLeaveLoading"
+                    @click="leaveVoiceChannel"
+                  >
+                    Leave Voice
                   </button>
                 </div>
               </div>
@@ -2262,6 +2499,22 @@ function formatChatTime(timestamp) {
   color: #15803d;
   background: #dcfce7;
   border-color: rgba(34, 197, 94, 0.32);
+}
+
+.voice-control-btn.leave {
+  color: #b91c1c;
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(254, 226, 226, 0.72);
+}
+
+.voice-control-btn.leave:hover:not(:disabled) {
+  background: rgba(254, 202, 202, 0.92);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.voice-control-btn.leave:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* =========================================================

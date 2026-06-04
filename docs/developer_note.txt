@@ -89,4 +89,17 @@ v0.52 Update
 - Verified that two users can enter the same voice channel and hear each other through HTTPS
 - Confirmed microphone permission works correctly through the Cloudflare HTTPS tunnel
 - Identified remaining audio quality issue: slight electronic tail / echo / robotic noise during speech
-- Planned next optimization: reduce echo and tail noise by testing with headphones, disabling autoGainControl, keeping echoCancellation and noiseSuppression enabled, and preventing duplicate remote stream playback
+- Planned next optimization: reduce echo and tail noise by testing with headphones, disabling autoGainControl, 
+keeping echoCancellation and noiseSuppression enabled, and preventing duplicate remote stream playback
+
+v0.53 Update
+- Added Leave Voice function for VOXYN voice channels
+- Users can now leave the current voice channel without leaving the room
+- Leaving voice now cleans up local microphone state and WebRTC voice connection
+- Added voice:leave backend event to remove users from Lobby / Squad / Break while keeping them inside the room chat
+- Fixed voice channel member display so users with voiceChannel: null no longer appear under Lobby
+- Improved frontend voice state logic after leaving a channel
+- Added local instant UI update so the current user disappears from the voice channel immediately after clicking Leave Voice
+- Prevented empty or null voice channels from falling back to Lobby incorrectly
+- Improved mic / speaking / listening state consistency after leaving and rejoining voice
+- Prepared voice channel behavior for a more Discord-like room experience

@@ -241,9 +241,10 @@ io.on("connection", (socket) => {
         avatarUrl,
         initial,
         voiceChannel,
-        isSpeaking: false,
-        isMicOn: true,
-        isDeafened: false,
+        voiceChannel,
+        isSpeaking: Boolean(payload?.isSpeaking),
+        isMicOn: Boolean(payload?.isMicOn),
+        isDeafened: Boolean(payload?.isDeafened),
         joinedAt: Date.now(),
       });
 
@@ -422,14 +423,20 @@ io.on("connection", (socket) => {
 
       if (typeof payload?.isSpeaking === "boolean") {
         currentUser.isSpeaking = payload.isSpeaking;
+      } else if (typeof payload?.speaking === "boolean") {
+        currentUser.isSpeaking = payload.speaking;
       }
 
       if (typeof payload?.isMicOn === "boolean") {
         currentUser.isMicOn = payload.isMicOn;
+      } else if (typeof payload?.micOn === "boolean") {
+        currentUser.isMicOn = payload.micOn;
       }
 
       if (typeof payload?.isDeafened === "boolean") {
         currentUser.isDeafened = payload.isDeafened;
+      } else if (typeof payload?.deafened === "boolean") {
+        currentUser.isDeafened = payload.deafened;
       }
 
       room.users.set(socket.id, currentUser);
@@ -509,6 +516,102 @@ io.on("connection", (socket) => {
       candidate,
     });
   });
+    /* =====================================================
+      SECTION 6.1.6: Leave Voice Channel
+      Purpose:
+      - Remove current socket user from voice channel only
+      - Keep user inside the room and chat
+      - Stop showing user under Lobby / Squad / Break
+      - Notify peers to close WebRTC connection
+    ===================================================== */
+    socket.on("voice:leave", (payload, callback) => {
+      try {
+        const roomCode = String(
+          payload?.roomCode || socket.data.roomCode || ""
+        ).trim();
+
+        if (!roomCode) {
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Room code is missing.",
+            });
+          }
+
+          return;
+        }
+
+        const room = rooms.get(roomCode);
+
+        if (!room) {
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Room state not found.",
+            });
+          }
+
+          return;
+        }
+
+        const currentUser = room.users.get(socket.id);
+
+        if (!currentUser) {
+          if (callback) {
+            callback({
+              ok: false,
+              error: "User is not inside this room.",
+            });
+          }
+
+          return;
+        }
+
+        const previousVoiceChannel =
+          currentUser.voiceChannel || socket.data.voiceChannel || "Lobby";
+
+        currentUser.voiceChannel = null;
+        currentUser.isMicOn = false;
+        currentUser.isDeafened = false;
+        currentUser.isSpeaking = false;
+
+        room.users.set(socket.id, currentUser);
+
+        socket.data.voiceChannel = null;
+
+        socket.to(roomCode).emit("voice:user-left", {
+          socketId: socket.id,
+          userId: currentUser.userId,
+          username: currentUser.username,
+          voiceChannel: previousVoiceChannel,
+        });
+
+        io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
+
+        socket.to(roomCode).emit("room:system", {
+          id: crypto.randomUUID(),
+          type: "system",
+          message: `${currentUser.username || "Someone"} left voice.`,
+          createdAt: Date.now(),
+        });
+
+        if (callback) {
+          callback({
+            ok: true,
+            previousVoiceChannel,
+          });
+        }
+      } catch (error) {
+        console.error("voice:leave error:", error);
+
+        if (callback) {
+          callback({
+            ok: false,
+            error: "Failed to leave voice channel.",
+          });
+        }
+      }
+    });
 
   /* =====================================================
     SECTION 6.2: Send Chat Message
@@ -693,6 +796,7 @@ io.on("connection", (socket) => {
     console.log("Socket disconnected:", socket.id);
   });
 });
+
 
 /* =========================================================
    SECTION 7: Start Server
