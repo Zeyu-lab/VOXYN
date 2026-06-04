@@ -60,3 +60,16 @@ v0.46 update
 - Added avatar cache-busting with avatar_updated_at
 - Improved Profile avatar upload flow and metadata update order
 - Prepared identity sync foundation for RoomView, backend socket users, and chat avatars
+
+v0.51 Update
+
+- Added voice channel presence display inside RoomView
+- Showed user avatars and profile initials inside fixed voice channels
+- Added voice channel member count for Lobby, Squad, and Break
+- Added speaking detection state with green avatar glow
+- Synced speaking status between two different accounts through backend socket state
+- Added Mic On / Muted and Listening / Deafened voice control UI
+- Confirmed two accounts can appear in the same Lobby and see each other’s speaking state
+- Verified localhost microphone access works for local voice-state testing
+- Identified that local network HTTP cannot reliably use microphone permissions
+- Prepared the foundation for v0.52 real WebRTC audio transmission and HTTPS tunnel testing

@@ -105,9 +105,26 @@ function cleanEmptyRoom(roomCode) {
 }
 
 /* =========================================================
+   SECTION 5.1: Voice Channel Helpers
+   Purpose:
+   - Keep voice channels fixed for VOXYN v0.5
+   - Prevent invalid channel names from entering room state
+========================================================= */
+function normalizeVoiceChannel(channel) {
+  const allowedChannels = ["Lobby", "Squad", "Break"];
+
+  if (allowedChannels.includes(channel)) {
+    return channel;
+  }
+
+  return "Lobby";
+}
+
+/* =========================================================
    SECTION 6: Socket.IO Main Logic
    Purpose:
    - Handle room join, chat messages, users, leave, disconnect
+   - Handle voice channel state and WebRTC signaling
 ========================================================= */
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
@@ -117,43 +134,48 @@ io.on("connection", (socket) => {
     Purpose:
     - User joins a room by roomCode
     - Save frontend profile identity into socket room users
+    - Default user into a fixed voice channel
   ===================================================== */
   socket.on("room:join", (payload, callback) => {
     try {
-      const roomCode = String(payload?.roomCode || "").trim()
-      const username = String(payload?.username || "Guest").trim()
-      const userId = String(payload?.userId || "").trim()
-      const email = String(payload?.email || "").trim()
-      const avatarUrl = String(payload?.avatarUrl || "").trim()
+      const roomCode = String(payload?.roomCode || "").trim();
+      const username = String(payload?.username || "Guest").trim();
+      const userId = String(payload?.userId || "").trim();
+      const email = String(payload?.email || "").trim();
+      const avatarUrl = String(payload?.avatarUrl || "").trim();
+      const voiceChannel = normalizeVoiceChannel(
+        payload?.voiceChannel || "Lobby"
+      );
 
       const initial = String(
         payload?.initial || username.charAt(0) || "U"
       )
         .trim()
         .charAt(0)
-        .toUpperCase()
+        .toUpperCase();
 
       if (!roomCode) {
         if (callback) {
           callback({
             ok: false,
             error: "Room code is required.",
-          })
+          });
         }
 
-        return
+        return;
       }
 
-      const room = getOrCreateRoom(roomCode)
+      const room = getOrCreateRoom(roomCode);
 
-      socket.join(roomCode)
+      socket.join(roomCode);
 
-      socket.data.roomCode = roomCode
-      socket.data.userId = userId
-      socket.data.username = username
-      socket.data.email = email
-      socket.data.avatarUrl = avatarUrl
-      socket.data.initial = initial
+      socket.data.roomCode = roomCode;
+      socket.data.userId = userId;
+      socket.data.username = username;
+      socket.data.email = email;
+      socket.data.avatarUrl = avatarUrl;
+      socket.data.initial = initial;
+      socket.data.voiceChannel = voiceChannel;
 
       room.users.set(socket.id, {
         socketId: socket.id,
@@ -162,37 +184,275 @@ io.on("connection", (socket) => {
         email,
         avatarUrl,
         initial,
+        voiceChannel,
+        isSpeaking: false,
+        isMicOn: true,
+        isDeafened: false,
         joinedAt: Date.now(),
-      })
+      });
 
-      socket.emit("room:history", room.messages)
+      socket.emit("room:history", room.messages);
 
-      io.to(roomCode).emit("room:users", getRoomUsers(roomCode))
+      io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
 
       socket.to(roomCode).emit("room:system", {
         id: crypto.randomUUID(),
         type: "system",
         message: `${username} joined the room.`,
         createdAt: Date.now(),
-      })
+      });
 
       if (callback) {
         callback({
           ok: true,
           roomCode,
-        })
+          voiceChannel,
+        });
       }
     } catch (error) {
-      console.error("room:join error:", error)
+      console.error("room:join error:", error);
 
       if (callback) {
         callback({
           ok: false,
           error: "Failed to join room.",
-        })
+        });
       }
     }
-  })
+  });
+
+  /* =====================================================
+    SECTION 6.1.1: Join Voice Channel
+    Purpose:
+    - Move current socket user between fixed voice channels
+    - Broadcast updated room users to everyone
+    - Notify same room for future WebRTC connection flow
+  ===================================================== */
+  socket.on("voice:join", (payload, callback) => {
+    try {
+      const roomCode = String(
+        payload?.roomCode || socket.data.roomCode || ""
+      ).trim();
+
+      const voiceChannel = normalizeVoiceChannel(payload?.voiceChannel);
+
+      if (!roomCode) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "Room code is missing.",
+          });
+        }
+
+        return;
+      }
+
+      const room = rooms.get(roomCode);
+
+      if (!room) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "Room state not found.",
+          });
+        }
+
+        return;
+      }
+
+      const currentUser = room.users.get(socket.id);
+
+      if (!currentUser) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "User is not inside this room.",
+          });
+        }
+
+        return;
+      }
+
+      const previousVoiceChannel = currentUser.voiceChannel || "Lobby";
+
+      currentUser.voiceChannel = voiceChannel;
+      socket.data.voiceChannel = voiceChannel;
+
+      room.users.set(socket.id, currentUser);
+
+      io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
+
+      socket.to(roomCode).emit("voice:user-joined", {
+        socketId: socket.id,
+        userId: currentUser.userId,
+        username: currentUser.username,
+        avatarUrl: currentUser.avatarUrl,
+        initial: currentUser.initial,
+        voiceChannel,
+        previousVoiceChannel,
+      });
+
+      socket.to(roomCode).emit("room:system", {
+        id: crypto.randomUUID(),
+        type: "system",
+        message: `${currentUser.username || "Someone"} joined ${voiceChannel}.`,
+        createdAt: Date.now(),
+      });
+
+      if (callback) {
+        callback({
+          ok: true,
+          voiceChannel,
+        });
+      }
+    } catch (error) {
+      console.error("voice:join error:", error);
+
+      if (callback) {
+        callback({
+          ok: false,
+          error: "Failed to join voice channel.",
+        });
+      }
+    }
+  });
+
+  /* =====================================================
+    SECTION 6.1.2: Voice State Update
+    Purpose:
+    - Sync mic / headphones / speaking state
+    - Used for UI indicators such as green speaking ring
+  ===================================================== */
+  socket.on("voice:state", (payload, callback) => {
+    try {
+      const roomCode = socket.data.roomCode;
+
+      if (!roomCode) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "Room code is missing.",
+          });
+        }
+
+        return;
+      }
+
+      const room = rooms.get(roomCode);
+
+      if (!room) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "Room state not found.",
+          });
+        }
+
+        return;
+      }
+
+      const currentUser = room.users.get(socket.id);
+
+      if (!currentUser) {
+        if (callback) {
+          callback({
+            ok: false,
+            error: "User is not inside this room.",
+          });
+        }
+
+        return;
+      }
+
+      if (typeof payload?.isSpeaking === "boolean") {
+        currentUser.isSpeaking = payload.isSpeaking;
+      }
+
+      if (typeof payload?.isMicOn === "boolean") {
+        currentUser.isMicOn = payload.isMicOn;
+      }
+
+      if (typeof payload?.isDeafened === "boolean") {
+        currentUser.isDeafened = payload.isDeafened;
+      }
+
+      room.users.set(socket.id, currentUser);
+
+      io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
+
+      if (callback) {
+        callback({
+          ok: true,
+        });
+      }
+    } catch (error) {
+      console.error("voice:state error:", error);
+
+      if (callback) {
+        callback({
+          ok: false,
+          error: "Failed to update voice state.",
+        });
+      }
+    }
+  });
+
+  /* =====================================================
+    SECTION 6.1.3: WebRTC Signaling - Offer
+    Purpose:
+    - Forward WebRTC offer to target socket
+  ===================================================== */
+  socket.on("voice:offer", (payload) => {
+    const targetSocketId = payload?.targetSocketId;
+    const offer = payload?.offer;
+
+    if (!targetSocketId || !offer) {
+      return;
+    }
+
+    io.to(targetSocketId).emit("voice:offer", {
+      fromSocketId: socket.id,
+      offer,
+    });
+  });
+
+  /* =====================================================
+    SECTION 6.1.4: WebRTC Signaling - Answer
+    Purpose:
+    - Forward WebRTC answer to target socket
+  ===================================================== */
+  socket.on("voice:answer", (payload) => {
+    const targetSocketId = payload?.targetSocketId;
+    const answer = payload?.answer;
+
+    if (!targetSocketId || !answer) {
+      return;
+    }
+
+    io.to(targetSocketId).emit("voice:answer", {
+      fromSocketId: socket.id,
+      answer,
+    });
+  });
+
+  /* =====================================================
+    SECTION 6.1.5: WebRTC Signaling - ICE Candidate
+    Purpose:
+    - Forward ICE candidate to target socket
+  ===================================================== */
+  socket.on("voice:ice-candidate", (payload) => {
+    const targetSocketId = payload?.targetSocketId;
+    const candidate = payload?.candidate;
+
+    if (!targetSocketId || !candidate) {
+      return;
+    }
+
+    io.to(targetSocketId).emit("voice:ice-candidate", {
+      fromSocketId: socket.id,
+      candidate,
+    });
+  });
 
   /* =====================================================
     SECTION 6.2: Send Chat Message
@@ -288,6 +548,7 @@ io.on("connection", (socket) => {
       }
     }
   });
+
   /* =====================================================
      SECTION 6.3: Leave Room Manually
      Purpose:
@@ -311,6 +572,12 @@ io.on("connection", (socket) => {
 
     io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
 
+    socket.to(roomCode).emit("voice:user-left", {
+      socketId: socket.id,
+      username,
+      voiceChannel: socket.data.voiceChannel || "Lobby",
+    });
+
     socket.to(roomCode).emit("room:system", {
       id: crypto.randomUUID(),
       type: "system",
@@ -326,6 +593,7 @@ io.on("connection", (socket) => {
     socket.data.email = null;
     socket.data.avatarUrl = null;
     socket.data.initial = null;
+    socket.data.voiceChannel = null;
   });
 
   /* =====================================================
@@ -336,6 +604,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     const roomCode = socket.data.roomCode;
     const username = socket.data.username || "Guest";
+    const voiceChannel = socket.data.voiceChannel || "Lobby";
 
     if (!roomCode) {
       console.log("Socket disconnected:", socket.id);
@@ -349,6 +618,12 @@ io.on("connection", (socket) => {
     }
 
     io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
+
+    socket.to(roomCode).emit("voice:user-left", {
+      socketId: socket.id,
+      username,
+      voiceChannel,
+    });
 
     socket.to(roomCode).emit("room:system", {
       id: crypto.randomUUID(),

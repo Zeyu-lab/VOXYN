@@ -7,9 +7,10 @@
    - Load Supabase client
    - Load Socket.IO client
 ========================================================= */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase, socket } from "../lib/supabaseClient"
+import { useVoiceRoom } from "../webrtc/useVoiceRoom.js"
 
 /* =========================================================
    SECTION 2: Router
@@ -49,6 +50,29 @@ const members = ref([])
 ========================================================= */
 const socketConnected = ref(false)
 const onlineUsers = ref([])
+
+
+/* =========================================================
+   SECTION 3.2: WebRTC Voice State
+   Purpose:
+   - Use isolated WebRTC voice logic from src/webrtc
+   - Keep RoomView focused on UI and room behavior
+========================================================= */
+console.log("useVoiceRoom loaded")
+const {
+  localStream,
+  remoteStreams,
+  isMicOn,
+  isDeafened,
+  isSpeaking,
+  isVoiceReady,
+  voiceError,
+  startLocalAudio,
+  toggleMicrophone,
+  toggleHeadphones,
+  cleanupVoiceRoom
+} = useVoiceRoom()
+
 
 /* =========================================================
    SECTION 4: Create Room Strip State
@@ -122,13 +146,34 @@ function goRoomRail(item) {
   }
 }
 
-const voiceChannels = computed(() => {
-  const channels = ["Lobby", "Squad", "Break"]
+const voiceChannelNames = ["Lobby", "Squad", "Break"]
 
-  return channels.map((name) => ({
-    name,
-    count: selectedVoiceChannel.value === name ? memberCount.value : 0
-  }))
+const voiceChannels = computed(() => {
+  return voiceChannelNames.map((name) => {
+    const usersInChannel = onlineUsers.value
+      .filter((onlineUser) => {
+        return (onlineUser.voiceChannel || "Lobby") === name
+      })
+      .map((onlineUser, index) => {
+        return normalizeVoiceUser(onlineUser, index)
+      })
+
+    return {
+      name,
+      count: usersInChannel.length,
+      users: usersInChannel
+    }
+  })
+})
+
+const currentVoiceMembers = computed(() => {
+  return onlineUsers.value
+    .filter((onlineUser) => {
+      return (onlineUser.voiceChannel || "Lobby") === selectedVoiceChannel.value
+    })
+    .map((onlineUser, index) => {
+      return normalizeVoiceUser(onlineUser, index)
+    })
 })
 
 const chatMessages = ref([
@@ -143,6 +188,193 @@ const chatMessages = ref([
   }
 ])
 
+/* =========================================================
+   SECTION 5.1: Voice Channel Actions
+   Purpose:
+   - Join a fixed voice channel
+   - Start local microphone before entering voice state
+   - Sync mic / headphone / speaking state with backend
+   - Keep avatar presence aligned with selected voice channel
+========================================================= */
+async function joinVoiceChannel(channelName) {
+  selectedVoiceChannel.value = channelName
+  errorMessage.value = ""
+
+  const stream = await ensureVoiceReady()
+
+  if (!stream) return
+
+  if (!socket.connected) {
+    errorMessage.value = "Voice server is not connected."
+    return
+  }
+
+  socket.emit(
+    "voice:join",
+    {
+      roomCode: roomCode.value,
+      voiceChannel: channelName,
+      userId: user.value?.id || "",
+      username: displayName.value,
+      avatarUrl: avatarUrl.value,
+      initial: profileInitial.value,
+      micOn: isMicOn.value,
+      deafened: isDeafened.value,
+      speaking: isSpeaking.value
+    },
+    (response) => {
+      if (!response?.ok) {
+        errorMessage.value =
+          response?.error || "Could not join voice channel."
+        return
+      }
+
+      emitVoiceState()
+    }
+  )
+}
+
+async function ensureVoiceReady() {
+  if (isVoiceReady.value && localStream.value) {
+    return localStream.value
+  }
+
+  const stream = await startLocalAudio()
+
+  if (!stream) {
+    errorMessage.value = voiceError.value || "Microphone could not start."
+    return null
+  }
+
+  return stream
+}
+
+function emitVoiceState() {
+  if (!socket.connected || !roomCode.value || !user.value) return
+
+  socket.emit("voice:state", {
+    roomCode: roomCode.value,
+    voiceChannel: selectedVoiceChannel.value,
+    userId: user.value?.id || "",
+    username: displayName.value,
+    avatarUrl: avatarUrl.value,
+    initial: profileInitial.value,
+    micOn: isMicOn.value,
+    deafened: isDeafened.value,
+    speaking: isMicOn.value && !isDeafened.value && isSpeaking.value
+  })
+}
+
+async function toggleRoomMicrophone() {
+  errorMessage.value = ""
+
+  const stream = await ensureVoiceReady()
+
+  if (!stream) return
+
+  toggleMicrophone()
+  emitVoiceState()
+}
+
+async function toggleRoomHeadphones() {
+  errorMessage.value = ""
+
+  const stream = await ensureVoiceReady()
+
+  if (!stream) return
+
+  toggleHeadphones()
+  emitVoiceState()
+}
+
+function normalizeVoiceUser(onlineUser, index = 0) {
+  const username =
+    onlineUser.username ||
+    onlineUser.displayName ||
+    onlineUser.name ||
+    "Guest"
+
+  const isCurrentUser = isCurrentVoiceUser(onlineUser)
+
+  return {
+    id:
+      onlineUser.socketId ||
+      onlineUser.userId ||
+      onlineUser.id ||
+      `voice-user-${index}`,
+    socketId: onlineUser.socketId,
+    userId: onlineUser.userId,
+    username,
+    avatarUrl:
+      onlineUser.avatarUrl ||
+      onlineUser.avatar_url ||
+      "",
+    initial:
+      onlineUser.initial ||
+      getUserInitial(username),
+    voiceChannel:
+      onlineUser.voiceChannel ||
+      "Lobby",
+    micOn: isCurrentUser
+      ? isMicOn.value
+      : onlineUser.micOn !== false,
+    deafened: isCurrentUser
+      ? isDeafened.value
+      : Boolean(onlineUser.deafened),
+    speaking: isCurrentUser
+      ? isMicOn.value && !isDeafened.value && isSpeaking.value
+      : Boolean(onlineUser.speaking)
+  }
+}
+
+function isCurrentVoiceUser(voiceUser) {
+  if (!voiceUser) return false
+
+  return (
+    voiceUser.userId === user.value?.id ||
+    voiceUser.socketId === socket.id
+  )
+}
+
+function getVoiceUserKey(voiceUser, index) {
+  return (
+    voiceUser.socketId ||
+    voiceUser.userId ||
+    voiceUser.id ||
+    `voice-user-${index}`
+  )
+}
+
+function getVoiceUserSpeaking(voiceUser) {
+  return (
+    getVoiceUserMicOn(voiceUser) &&
+    !getVoiceUserDeafened(voiceUser) &&
+    Boolean(voiceUser.speaking)
+  )
+}
+
+function getVoiceUserMicOn(voiceUser) {
+  if (isCurrentVoiceUser(voiceUser)) {
+    return isMicOn.value
+  }
+
+  return voiceUser?.micOn !== false
+}
+
+function getVoiceUserDeafened(voiceUser) {
+  if (isCurrentVoiceUser(voiceUser)) {
+    return isDeafened.value
+  }
+
+  return Boolean(voiceUser?.deafened)
+}
+
+watch(
+  [isMicOn, isDeafened, isSpeaking, selectedVoiceChannel],
+  () => {
+    emitVoiceState()
+  }
+)
 /* =========================================================
    SECTION 6: Computed Room Data
    Purpose:
@@ -294,6 +526,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  cleanupVoiceRoom()
   leaveSocketRoom(true)
 })
 
@@ -528,7 +761,8 @@ function joinSocketRoom() {
       username: displayName.value,
       avatarUrl: avatarUrl.value,
       initial: profileInitial.value,
-      email: user.value?.email || ""
+      email: user.value?.email || "",
+      voiceChannel: selectedVoiceChannel.value
     },
     (response) => {
       if (!response?.ok) {
@@ -799,23 +1033,115 @@ function formatChatTime(timestamp) {
                 Voice Channels
               </div>
 
-              <button
+              <div
                 v-for="channel in voiceChannels"
                 :key="channel.name"
-                class="channel-item"
-                :class="{ active: selectedVoiceChannel === channel.name }"
-                @click="selectedVoiceChannel = channel.name"
+                class="voice-channel-block"
               >
-                <span class="channel-left">
-                  <span class="voice-icon">
-                    {{ selectedVoiceChannel === channel.name ? "◉" : "○" }}
+                <button
+                  class="channel-item"
+                  :class="{ active: selectedVoiceChannel === channel.name }"
+                  @click="joinVoiceChannel(channel.name)"
+                >
+                  <span class="channel-left">
+                    <span class="voice-icon">
+                      {{ selectedVoiceChannel === channel.name ? "◉" : "○" }}
+                    </span>
+                    <span>{{ channel.name }}</span>
                   </span>
-                  <span>{{ channel.name }}</span>
-                </span>
 
-                <small>{{ channel.count }}</small>
-              </button>
+                  <small>{{ channel.count }}</small>
+                </button>
 
+                <div
+                  v-if="channel.users.length"
+                  class="voice-users-list"
+                >
+                  <div
+                    v-for="(voiceUser, index) in channel.users"
+                    :key="getVoiceUserKey(voiceUser, index)"
+                    class="voice-user-row"
+                  >
+                    <div
+                      class="voice-user-avatar"
+                      :class="{
+                        'is-speaking': getVoiceUserSpeaking(voiceUser),
+                        'is-muted': !getVoiceUserMicOn(voiceUser),
+                        'is-deafened': getVoiceUserDeafened(voiceUser)
+                      }"
+                    >
+                      <img
+                        v-if="voiceUser.avatarUrl"
+                        class="voice-user-avatar-img"
+                        :src="voiceUser.avatarUrl"
+                        :alt="voiceUser.username"
+                      />
+
+                      <template v-else>
+                        {{ voiceUser.initial }}
+                      </template>
+                    </div>
+
+                    <div class="voice-user-info">
+                      <span>{{ voiceUser.username }}</span>
+
+                      <small v-if="getVoiceUserDeafened(voiceUser)">
+                        Deafened
+                      </small>
+
+                      <small v-else-if="!getVoiceUserMicOn(voiceUser)">
+                        Muted
+                      </small>
+
+                      <small v-else-if="getVoiceUserSpeaking(voiceUser)">
+                        Speaking
+                      </small>
+
+                      <small v-else>
+                        Connected
+                      </small>
+                    </div>
+
+                    <span
+                      v-if="getVoiceUserDeafened(voiceUser)"
+                      class="voice-user-state"
+                    >
+                      ⊘
+                    </span>
+
+                    <span
+                      v-else-if="!getVoiceUserMicOn(voiceUser)"
+                      class="voice-user-state"
+                    >
+                      ◌
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="voice-control-panel">
+                <p>
+                  {{ isVoiceReady ? `Connected to ${selectedVoiceChannel}` : "Join a channel to start voice." }}
+                </p>
+
+                <div class="voice-control-row">
+                  <button
+                    class="voice-control-btn"
+                    :class="{ active: isMicOn }"
+                    @click="toggleRoomMicrophone"
+                  >
+                    {{ isMicOn ? "Mic On" : "Muted" }}
+                  </button>
+
+                  <button
+                    class="voice-control-btn"
+                    :class="{ active: !isDeafened }"
+                    @click="toggleRoomHeadphones"
+                  >
+                    {{ isDeafened ? "Deafened" : "Listening" }}
+                  </button>
+                </div>
+              </div>
               <div class="card-divider"></div>
 
               <div class="card-title">
@@ -1571,6 +1897,188 @@ function formatChatTime(timestamp) {
   height: 1px;
   margin: 12px 0;
   background: #e2e8f0;
+}
+
+/* =========================================================
+   SECTION 6.1: Voice Presence
+   Purpose:
+   - Show users inside each voice channel
+   - Show avatar speaking glow
+   - Show mute / deafen state
+========================================================= */
+.voice-channel-block {
+  margin-bottom: 10px;
+}
+
+.voice-channel-block .channel-item {
+  margin-bottom: 0;
+}
+
+.voice-users-list {
+  margin: 8px 0 12px 30px;
+  display: grid;
+  gap: 8px;
+}
+
+.voice-user-row {
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 8px;
+
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.voice-user-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  overflow: hidden;
+
+  color: white;
+  background: linear-gradient(135deg, #4f46e5, #3b82f6);
+
+  font-size: 12px;
+  font-weight: 950;
+
+  border: 2px solid rgba(255, 255, 255, 0.92);
+
+  transition:
+    box-shadow 0.16s ease,
+    border-color 0.16s ease,
+    transform 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.voice-user-avatar-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.voice-user-avatar.is-speaking {
+  border-color: rgba(34, 197, 94, 0.95);
+  box-shadow:
+    0 0 0 3px rgba(34, 197, 94, 0.18),
+    0 0 18px rgba(34, 197, 94, 0.48);
+  transform: translateY(-1px);
+}
+
+.voice-user-avatar.is-muted,
+.voice-user-avatar.is-deafened {
+  opacity: 0.58;
+  filter: grayscale(0.35);
+}
+
+.voice-user-info {
+  min-width: 0;
+}
+
+.voice-user-info span {
+  display: block;
+  overflow: hidden;
+
+  color: #334155;
+  font-size: 13px;
+  font-weight: 950;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-user-info small {
+  display: block;
+  margin-top: 2px;
+
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.voice-user-state {
+  width: 24px;
+  height: 24px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  color: #64748b;
+  background: white;
+  border: 1px solid #e2e8f0;
+
+  font-size: 12px;
+  font-weight: 950;
+}
+
+/* =========================================================
+   SECTION 6.2: Voice Controls
+   Purpose:
+   - Control local mic and headphone listening state
+========================================================= */
+.voice-control-panel {
+  margin-top: 14px;
+  padding: 12px;
+
+  border-radius: 18px;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid #e2e8f0;
+}
+
+.voice-control-panel p {
+  margin: 0 0 10px;
+
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.voice-control-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.voice-control-btn {
+  min-height: 38px;
+  padding: 0 10px;
+
+  border-radius: 13px;
+  border: 1px solid #cbd5e1;
+
+  color: #475569;
+  background: white;
+
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+
+  transition:
+    transform 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.voice-control-btn:hover {
+  transform: translateY(-1px);
+}
+
+.voice-control-btn.active {
+  color: #15803d;
+  background: #dcfce7;
+  border-color: rgba(34, 197, 94, 0.32);
 }
 
 /* =========================================================
