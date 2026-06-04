@@ -8,6 +8,7 @@ const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 const crypto = require("crypto");
+const path = require("path");
 require("dotenv").config();
 
 /* =========================================================
@@ -19,24 +20,45 @@ require("dotenv").config();
 const app = express();
 
 const PORT = process.env.PORT || 3001;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+
+const allowedOrigins = [
+  process.env.CLIENT_URL || "http://localhost:5173",
+  "http://localhost:3001",
+];
 
 app.use(
   cors({
-    origin: CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith(".trycloudflare.com")
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   })
 );
 
 app.use(express.json());
 
+
 /* =========================================================
    SECTION 3: Basic API Routes
    Purpose:
    - Keep existing backend test routes
 ========================================================= */
-app.get("/", (req, res) => {
-  res.send("VOXYN backend is running");
+app.get("/api", (req, res) => {
+  res.json({
+    status: "ok",
+    message: "VOXYN backend is running",
+  });
 });
 
 app.get("/api/health", (req, res) => {
@@ -55,10 +77,44 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith(".trycloudflare.com")
+      ) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by Socket.IO CORS"));
+    },
     methods: ["GET", "POST"],
     credentials: true,
   },
+});
+/* =================================================
+   SECTION 4.1 : Serve Frontend Build
+   Purpose:
+   - Serve Vue production build from Express
+   - Allows VOXYN to run through one HTTPS tunnel
+================================================== */
+const frontendDistPath = path.join(__dirname, "../frontend/dist");
+
+app.use(express.static(frontendDistPath));
+
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api")) {
+    return next();
+  }
+
+  if (req.path.startsWith("/socket.io")) {
+    return next();
+  }
+
+  res.sendFile(path.join(frontendDistPath, "index.html"));
 });
 
 /* =========================================================
@@ -646,3 +702,4 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`VOXYN backend running on http://localhost:${PORT}`);
 });
+

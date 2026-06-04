@@ -11,6 +11,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase, socket } from "../lib/supabaseClient"
 import { useVoiceRoom } from "../webrtc/useVoiceRoom.js"
+console.log("VOXYN v0.52 RoomView build loaded")
 
 /* =========================================================
    SECTION 2: Router
@@ -57,8 +58,10 @@ const onlineUsers = ref([])
    Purpose:
    - Use isolated WebRTC voice logic from src/webrtc
    - Keep RoomView focused on UI and room behavior
+   - Prepare remote audio elements for real WebRTC playback
 ========================================================= */
 console.log("useVoiceRoom loaded")
+
 const {
   localStream,
   remoteStreams,
@@ -70,9 +73,37 @@ const {
   startLocalAudio,
   toggleMicrophone,
   toggleHeadphones,
+  connectToPeer,
+  handleVoiceOffer,
+  handleVoiceAnswer,
+  handleVoiceIceCandidate,
+  syncVoicePeers,
+  removePeerConnection,
   cleanupVoiceRoom
 } = useVoiceRoom()
 
+const remoteAudioItems = computed(() => {
+  return Object.entries(remoteStreams.value).map(([socketId, stream]) => {
+    return {
+      socketId,
+      stream
+    }
+  })
+})
+
+function bindRemoteAudioElement(element, stream) {
+  if (!element || !stream) return
+
+  if (element.srcObject !== stream) {
+    element.srcObject = stream
+  }
+
+  element.muted = isDeafened.value
+
+  element.play().catch((error) => {
+    console.warn("VOXYN voice: remote audio play blocked", error)
+  })
+}
 
 /* =========================================================
    SECTION 4: Create Room Strip State
@@ -194,7 +225,7 @@ const chatMessages = ref([
    - Join a fixed voice channel
    - Start local microphone before entering voice state
    - Sync mic / headphone / speaking state with backend
-   - Keep avatar presence aligned with selected voice channel
+   - Start real WebRTC peer connection with users in same channel
 ========================================================= */
 async function joinVoiceChannel(channelName) {
   selectedVoiceChannel.value = channelName
@@ -218,9 +249,14 @@ async function joinVoiceChannel(channelName) {
       username: displayName.value,
       avatarUrl: avatarUrl.value,
       initial: profileInitial.value,
+
       micOn: isMicOn.value,
       deafened: isDeafened.value,
-      speaking: isSpeaking.value
+      speaking: isSpeaking.value,
+
+      isMicOn: isMicOn.value,
+      isDeafened: isDeafened.value,
+      isSpeaking: isSpeaking.value
     },
     (response) => {
       if (!response?.ok) {
@@ -230,6 +266,7 @@ async function joinVoiceChannel(channelName) {
       }
 
       emitVoiceState()
+      syncCurrentVoicePeers()
     }
   )
 }
@@ -248,22 +285,55 @@ async function ensureVoiceReady() {
 
   return stream
 }
-
 function emitVoiceState() {
   if (!socket.connected || !roomCode.value || !user.value) return
 
-  socket.emit("voice:state", {
+  const currentSpeaking =
+    isMicOn.value && !isDeafened.value && isSpeaking.value
+
+  const payload = {
     roomCode: roomCode.value,
     voiceChannel: selectedVoiceChannel.value,
     userId: user.value?.id || "",
     username: displayName.value,
     avatarUrl: avatarUrl.value,
     initial: profileInitial.value,
+
     micOn: isMicOn.value,
     deafened: isDeafened.value,
-    speaking: isMicOn.value && !isDeafened.value && isSpeaking.value
+    speaking: currentSpeaking,
+
+    isMicOn: isMicOn.value,
+    isDeafened: isDeafened.value,
+    isSpeaking: currentSpeaking
+  }
+
+  console.log("VOXYN voice: emit state", payload)
+
+  socket.emit("voice:state", payload, (response) => {
+    console.log("VOXYN voice: state ack", response)
   })
 }
+
+async function syncCurrentVoicePeers() {
+  console.log("VOXYN voice: sync peers check", {
+    socketConnected: socket.connected,
+    isVoiceReady: isVoiceReady.value,
+    socketId: socket.id,
+    selectedVoiceChannel: selectedVoiceChannel.value,
+    users: onlineUsers.value
+  })
+
+  if (!socket.connected || !isVoiceReady.value || !socket.id) return
+
+  await syncVoicePeers({
+    users: onlineUsers.value,
+    currentSocketId: socket.id,
+    currentVoiceChannel: selectedVoiceChannel.value,
+    socket
+  })
+}
+
 
 async function toggleRoomMicrophone() {
   errorMessage.value = ""
@@ -274,6 +344,7 @@ async function toggleRoomMicrophone() {
 
   toggleMicrophone()
   emitVoiceState()
+  syncCurrentVoicePeers()
 }
 
 async function toggleRoomHeadphones() {
@@ -315,15 +386,18 @@ function normalizeVoiceUser(onlineUser, index = 0) {
     voiceChannel:
       onlineUser.voiceChannel ||
       "Lobby",
+
     micOn: isCurrentUser
       ? isMicOn.value
-      : onlineUser.micOn !== false,
+      : onlineUser.micOn !== false && onlineUser.isMicOn !== false,
+
     deafened: isCurrentUser
       ? isDeafened.value
-      : Boolean(onlineUser.deafened),
+      : Boolean(onlineUser.deafened || onlineUser.isDeafened),
+
     speaking: isCurrentUser
       ? isMicOn.value && !isDeafened.value && isSpeaking.value
-      : Boolean(onlineUser.speaking)
+      : Boolean(onlineUser.speaking || onlineUser.isSpeaking)
   }
 }
 
@@ -349,7 +423,7 @@ function getVoiceUserSpeaking(voiceUser) {
   return (
     getVoiceUserMicOn(voiceUser) &&
     !getVoiceUserDeafened(voiceUser) &&
-    Boolean(voiceUser.speaking)
+    Boolean(voiceUser.speaking || voiceUser.isSpeaking)
   )
 }
 
@@ -358,7 +432,7 @@ function getVoiceUserMicOn(voiceUser) {
     return isMicOn.value
   }
 
-  return voiceUser?.micOn !== false
+  return voiceUser?.micOn !== false && voiceUser?.isMicOn !== false
 }
 
 function getVoiceUserDeafened(voiceUser) {
@@ -366,13 +440,14 @@ function getVoiceUserDeafened(voiceUser) {
     return isDeafened.value
   }
 
-  return Boolean(voiceUser?.deafened)
+  return Boolean(voiceUser?.deafened || voiceUser?.isDeafened)
 }
 
 watch(
   [isMicOn, isDeafened, isSpeaking, selectedVoiceChannel],
   () => {
     emitVoiceState()
+    syncCurrentVoicePeers()
   }
 )
 /* =========================================================
@@ -735,18 +810,90 @@ function registerSocketListeners() {
   socket.off("room:users", handleRoomUsers)
   socket.off("room:system", handleSystemMessage)
 
+  socket.off("voice:offer", handleIncomingVoiceOffer)
+  socket.off("voice:answer", handleIncomingVoiceAnswer)
+  socket.off("voice:ice-candidate", handleIncomingVoiceIceCandidate)
+  socket.off("voice:user-left", handleVoiceUserLeft)
+
   socket.on("connect", handleSocketConnect)
   socket.on("disconnect", handleSocketDisconnect)
   socket.on("room:history", handleRoomHistory)
   socket.on("chat:new", handleNewChatMessage)
   socket.on("room:users", handleRoomUsers)
   socket.on("room:system", handleSystemMessage)
+
+  socket.on("voice:offer", handleIncomingVoiceOffer)
+  socket.on("voice:answer", handleIncomingVoiceAnswer)
+  socket.on("voice:ice-candidate", handleIncomingVoiceIceCandidate)
+  socket.on("voice:user-left", handleVoiceUserLeft)
+}
+
+function handleRoomUsers(users) {
+  onlineUsers.value = Array.isArray(users) ? users : []
+
+  console.log(
+    "VOXYN voice: room users update",
+    onlineUsers.value.map((onlineUser) => ({
+      username: onlineUser.username,
+      socketId: onlineUser.socketId,
+      voiceChannel: onlineUser.voiceChannel,
+      isSpeaking: onlineUser.isSpeaking,
+      speaking: onlineUser.speaking,
+      isMicOn: onlineUser.isMicOn,
+      micOn: onlineUser.micOn,
+      isDeafened: onlineUser.isDeafened,
+      deafened: onlineUser.deafened
+    }))
+  )
+
+  syncCurrentVoicePeers()
+}
+
+async function handleIncomingVoiceOffer(payload) {
+  try {
+    await handleVoiceOffer(
+      payload?.fromSocketId,
+      payload?.offer,
+      socket
+    )
+  } catch (error) {
+    console.error("VOXYN voice: failed to handle offer", error)
+  }
+}
+
+async function handleIncomingVoiceAnswer(payload) {
+  try {
+    await handleVoiceAnswer(
+      payload?.fromSocketId,
+      payload?.answer
+    )
+  } catch (error) {
+    console.error("VOXYN voice: failed to handle answer", error)
+  }
+}
+
+async function handleIncomingVoiceIceCandidate(payload) {
+  try {
+    await handleVoiceIceCandidate(
+      payload?.fromSocketId,
+      payload?.candidate
+    )
+  } catch (error) {
+    console.error("VOXYN voice: failed to handle ICE candidate", error)
+  }
+}
+
+function handleVoiceUserLeft(payload) {
+  if (!payload?.socketId) return
+
+  removePeerConnection(payload.socketId)
 }
 
 function handleSocketConnect() {
   socketConnected.value = true
   joinSocketRoom()
 }
+
 
 function handleSocketDisconnect() {
   socketConnected.value = false
@@ -796,10 +943,6 @@ function handleNewChatMessage(newMessage) {
   chatMessages.value.push(normalizeSocketMessage(newMessage))
 }
 
-function handleRoomUsers(users) {
-  onlineUsers.value = Array.isArray(users) ? users : []
-}
-
 function handleSystemMessage(systemMessage) {
   chatMessages.value.push(normalizeSocketMessage(systemMessage))
 }
@@ -815,6 +958,13 @@ function leaveSocketRoom(disconnectSocket = false) {
   socket.off("chat:new", handleNewChatMessage)
   socket.off("room:users", handleRoomUsers)
   socket.off("room:system", handleSystemMessage)
+
+  socket.off("voice:offer", handleIncomingVoiceOffer)
+  socket.off("voice:answer", handleIncomingVoiceAnswer)
+  socket.off("voice:ice-candidate", handleIncomingVoiceIceCandidate)
+  socket.off("voice:user-left", handleVoiceUserLeft)
+
+  cleanupVoiceRoom()
 
   onlineUsers.value = []
   socketConnected.value = false
@@ -1298,6 +1448,24 @@ function formatChatTime(timestamp) {
         <p v-if="successMessage" class="success-message">
           {{ successMessage }}
         </p>
+
+            <!-- =====================================================
+                SECTION 6: Remote WebRTC Audio
+                Purpose:
+                - Play incoming peer audio streams
+                - Hidden because voice users are already shown in UI
+            ====================================================== -->
+            <div class="remote-audio-layer" aria-hidden="true">
+              <audio
+                v-for="item in remoteAudioItems"
+                :key="item.socketId"
+                :ref="(element) => bindRemoteAudioElement(element, item.stream)"
+                autoplay
+                playsinline
+                data-voxyn-remote-audio
+              ></audio>
+            </div>
+
       </template>
     </section>
   </main>
@@ -1310,6 +1478,21 @@ function formatChatTime(timestamp) {
 .room-page *::after {
   box-sizing: border-box;
 }
+
+/* =========================================================
+   SECTION 0.1: Remote Audio Layer
+   Purpose:
+   - Keep WebRTC audio elements available but invisible
+========================================================= */
+.remote-audio-layer {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 /* =========================================================
    SECTION 1: Page Shell
 ========================================================= */
