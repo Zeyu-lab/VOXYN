@@ -103,3 +103,25 @@ v0.53 Update
 - Prevented empty or null voice channels from falling back to Lobby incorrectly
 - Improved mic / speaking / listening state consistency after leaving and rejoining voice
 - Prepared voice channel behavior for a more Discord-like room experience
+
+propmt
+cloudflared tunnel --url http://localhost:3001
+npm run build
+npm run dev
+
+v0.6 Update
+- Polished the VOXYN authentication experience
+- Redesigned the Login page to better match the VOXYN light liquid-glass visual style
+- Updated Login color system to align with Dashboard, Room Workspace, and Settings pages
+- Added a separate Create Account page instead of keeping signup inside the Login page
+- Implemented email-based account creation using email as the username
+- Added password and confirm-password validation for signup
+- Added account-created verification state after signup
+- Added Back to Login navigation inside the Create Account and verification flow
+- Added functional Forgot Password flow using Supabase reset password email
+- Created an Update Password page for password recovery links
+- Added /signup and /update-password routes to the router
+- Adjusted verification messaging for local development where localhost email confirmation may not open correctly
+- Updated Home page navigation so Get Started routes to Create Account and Log in routes to Login
+- Optimized the Home top bar to better match the v0.6 auth visual system
+- Made the landing page navigation lighter, cleaner, and more consistent with VOXYN’s product identity

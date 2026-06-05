@@ -106,15 +106,13 @@ function bindRemoteAudioElement(element, stream) {
 }
 
 /* =========================================================
-   SECTION 4: Create Room Strip State
+   SECTION 4: Current Room Control Strip State
    Purpose:
-   - Allow user to create a new room from RoomView
-   - Free MVP rule: new room replaces previous owned room
+   - Replace create-room form inside RoomView
+   - Show useful current room information
+   - Keep RoomView focused on using the current room
 ========================================================= */
-const newRoomName = ref("")
-const newMaxMembers = ref(5)
-const memberLimitOptions = [5, 8, 10]
-
+const roomControlSubtitle = "Invite friends, manage voice, and keep this room active."
 /* =========================================================
    SECTION 5: UI State
    Purpose:
@@ -662,6 +660,17 @@ const memberCount = computed(() => {
   return onlineUsers.value.length || members.value.length || 1
 })
 
+const currentVoiceLabel = computed(() => {
+  if (!hasJoinedVoice.value) {
+    return "Not connected"
+  }
+
+  const voiceCount = currentVoiceMembers.value.length || 1
+
+  return `${voiceCount} in ${selectedVoiceChannel.value}`
+})
+
+
 const isOwner = computed(() => {
   if (!user.value || !room.value) return false
   return user.value.id === room.value.owner_id
@@ -905,14 +914,10 @@ async function loadRoomMembers() {
 /* =========================================================
    SECTION 9: Room Helpers
    Purpose:
-   - Generate room code
    - Copy room code
+   - Copy invite link
    - Navigate back
 ========================================================= */
-function generateRoomCode() {
-  return Math.random().toString(36).substring(2, 8).toUpperCase()
-}
-
 async function copyRoomCode() {
   errorMessage.value = ""
   successMessage.value = ""
@@ -922,6 +927,21 @@ async function copyRoomCode() {
     successMessage.value = `Room code ${roomCode.value} copied.`
   } catch {
     errorMessage.value = "Could not copy room code."
+  }
+}
+
+async function copyInviteLink() {
+  errorMessage.value = ""
+  successMessage.value = ""
+
+  try {
+    const inviteLink = `${window.location.origin}/room/${roomCode.value}`
+
+    await navigator.clipboard.writeText(inviteLink)
+
+    successMessage.value = "Invite link copied."
+  } catch {
+    errorMessage.value = "Could not copy invite link."
   }
 }
 
@@ -984,6 +1004,30 @@ async function createNewRoomFromWorkspace() {
   await loadRoomPage()
 }
 
+async function leaveCurrentRoom() {
+  if (actionLoading.value) return
+
+  errorMessage.value = ""
+  successMessage.value = ""
+  actionLoading.value = true
+
+  try {
+    if (hasJoinedVoice.value) {
+      await leaveVoiceChannel()
+    } else {
+      cleanupVoiceRoom()
+    }
+
+    leaveSocketRoom(true)
+
+    router.push("/dashboard")
+  } catch (error) {
+    console.error("VOXYN room: failed to leave room", error)
+    errorMessage.value = "Could not leave room."
+  } finally {
+    actionLoading.value = false
+  }
+}
 /* =========================================================
    SECTION 11: Socket.IO Room Connection
    Purpose:
@@ -1333,50 +1377,62 @@ function formatChatTime(timestamp) {
         <!-- ===============================================
              SECTION 4: Create Room Strip
         ================================================ -->
-        <section class="create-strip">
-          <div class="create-strip-left">
-            <div class="plus-box">＋</div>
+            <section class="create-strip room-control-strip">
+              <div class="room-control-left">
+                <div class="room-icon-box">◆</div>
 
-            <div>
-              <h2>Create a New Room</h2>
-              <p>Set the maximum members and create a new room.</p>
-            </div>
-          </div>
+                <div class="room-control-title">
+                  <p class="strip-eyebrow">Current Room</p>
+                  <h2>{{ roomTitle }}</h2>
+                  <p>{{ roomControlSubtitle }}</p>
+                </div>
+              </div>
 
-          <div class="create-strip-control">
-            <label>
-              Room name
-              <input
-                v-model="newRoomName"
-                type="text"
-                placeholder="New VOXYN Room"
-              />
-            </label>
+              <div class="room-control-meta">
+                <div class="room-meta-item">
+                  <span>Room Code</span>
+                  <strong>{{ roomCode }}</strong>
+                </div>
 
-            <div>
-              <span class="strip-label">Max members</span>
+                <div class="room-meta-item">
+                  <span>Members</span>
+                  <strong>{{ memberCount }} / {{ maxMembers }}</strong>
+                </div>
 
-              <div class="limit-options">
+                <div class="room-meta-item">
+                  <span>Owner</span>
+                  <strong>{{ ownerLabel }}</strong>
+                </div>
+
+                <div class="room-meta-item">
+                  <span>Voice</span>
+                  <strong>{{ currentVoiceLabel }}</strong>
+                </div>
+
+                <div class="room-meta-item">
+                  <span>Status</span>
+                  <strong class="meta-live">● Live</strong>
+                </div>
+              </div>
+
+              <div class="room-control-actions">
+                <button class="room-action-btn" @click="copyInviteLink">
+                  ⛓ Copy Invite Link
+                </button>
+
+                <button class="room-action-btn" @click="copyRoomCode">
+                  ⧉ Copy Room Code
+                </button>
+
                 <button
-                  v-for="option in memberLimitOptions"
-                  :key="option"
-                  :class="{ active: newMaxMembers === option }"
-                  @click="newMaxMembers = option"
+                  class="room-action-btn danger"
+                  :disabled="actionLoading"
+                  @click="leaveCurrentRoom"
                 >
-                  {{ option }}
+                  {{ actionLoading ? "Leaving..." : "Leave Room" }}
                 </button>
               </div>
-            </div>
-
-            <button
-              class="create-room-btn"
-              :disabled="actionLoading"
-              @click="createNewRoomFromWorkspace"
-            >
-              {{ actionLoading ? "Creating..." : "Create Room" }}
-            </button>
-          </div>
-        </section>
+            </section>
 
         <!-- ===============================================
              SECTION 5: Workspace Grid
@@ -2012,17 +2068,16 @@ function formatChatTime(timestamp) {
   border-radius: 999px;
   background: #22c55e;
 }
-
 /* =========================================================
-   SECTION 4: Create Strip
+   SECTION 4: Current Room Control Strip
 ========================================================= */
 .create-strip {
   margin-top: 14px;
-  min-height: 92px;
-  padding: 16px 22px;
+  min-height: 112px;
+  padding: 18px 22px;
   display: grid;
-  grid-template-columns: 520px minmax(0, 1fr);
-  gap: 30px;
+  grid-template-columns: minmax(300px, 380px) minmax(420px, 1fr) 300px;
+  gap: 22px;
   align-items: center;
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.94);
@@ -2030,109 +2085,177 @@ function formatChatTime(timestamp) {
   overflow: hidden;
 }
 
-.create-strip-left {
+.room-control-left {
   display: flex;
   align-items: center;
   gap: 16px;
   min-width: 0;
 }
 
-.plus-box {
-  width: 54px;
-  height: 54px;
-  flex: 0 0 54px;
+.room-icon-box {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 58px;
   display: grid;
   place-items: center;
-  border-radius: 18px;
+  border-radius: 20px;
   color: white;
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
-  font-size: 26px;
+  background: linear-gradient(135deg, #3b82f6, #4f46e5);
+  font-size: 24px;
   font-weight: 950;
-  box-shadow: 0 16px 34px rgba(99, 102, 241, 0.22);
+  box-shadow: 0 18px 38px rgba(79, 70, 229, 0.24);
+}
+
+.room-control-title {
+  min-width: 0;
+}
+
+.strip-eyebrow {
+  margin: 0 0 6px;
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
 }
 
 .create-strip h2 {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 950;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.04em;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .create-strip p {
   margin: 0;
   color: #64748b;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 750;
+}
+
+.room-control-meta {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.room-meta-item {
+  min-width: 0;
+  padding: 0 12px;
+  border-left: 1px solid #e2e8f0;
+}
+
+.room-meta-item span {
+  display: block;
+  margin-bottom: 8px;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
   white-space: nowrap;
 }
 
-.create-strip-control {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) 320px 260px;
-  gap: 14px;
-  align-items: end;
+.room-meta-item strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.create-strip label,
-.strip-label {
-  display: block;
-  margin-bottom: 8px;
+.room-meta-item:first-child strong {
+  color: #4f46e5;
+  letter-spacing: 0.16em;
+}
+
+.meta-live {
+  color: #16a34a !important;
+  letter-spacing: 0 !important;
+}
+
+.room-control-actions {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.room-action-btn {
+  min-height: 38px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid #cbd5e1;
+  background: rgba(255, 255, 255, 0.82);
   color: #334155;
   font-size: 12px;
-  font-weight: 900;
-}
-
-.create-strip input {
-  width: 100%;
-  max-width: 100%;
-  min-height: 42px;
-  padding: 0 14px;
-  border-radius: 14px;
-  border: 1px solid #cbd5e1;
-  outline: none;
-  font-weight: 800;
+  font-weight: 950;
+  cursor: pointer;
   box-sizing: border-box;
 }
 
-.limit-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  min-width: 0;
-}
-
-.limit-options button {
-  width: 100%;
-  min-width: 0;
-  min-height: 42px;
-  border-radius: 14px;
-  border: 1px solid #cbd5e1;
+.room-action-btn:hover {
   background: white;
-  color: #334155;
-  font-weight: 950;
-  cursor: pointer;
-  box-sizing: border-box;
+  border-color: #94a3b8;
 }
 
-.limit-options button.active {
-  color: white;
-  border-color: transparent;
-  background: linear-gradient(135deg, #4f46e5, #6366f1);
+.room-action-btn.danger {
+  grid-column: 1 / -1;
+  color: #dc2626;
+  border-color: #fecaca;
+  background: #fff7f7;
 }
 
-.create-room-btn {
-  width: 100%;
-  min-width: 0;
-  min-height: 42px;
-  border: none;
-  border-radius: 14px;
-  color: white;
-  background: linear-gradient(135deg, #3b82f6, #4f46e5);
-  font-weight: 950;
-  cursor: pointer;
-  box-sizing: border-box;
+.room-action-btn.danger:hover {
+  background: #fee2e2;
+}
+
+.room-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 980px) {
+  .room-control-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .room-control-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .room-action-btn.danger {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .room-control-left {
+    align-items: flex-start;
+  }
+
+  .room-icon-box {
+    width: 50px;
+    height: 50px;
+    flex-basis: 50px;
+  }
+
+  .room-control-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .room-meta-item {
+    border-left: none;
+    border-top: 1px solid #e2e8f0;
+    padding: 10px 0 0;
+  }
 }
 /* =========================================================
    SECTION 5: Workspace Grid

@@ -6,11 +6,18 @@
    - Load router
    - Load Supabase auth
    - Load VoicePanel component
+   - Load Settings section components
 ========================================================= */
 import { computed, onMounted, ref } from "vue"
 import { useRouter } from "vue-router"
 import { supabase } from "../lib/supabaseClient"
 import VoicePanel from "../components/VoicePanel.vue"
+
+import AccountSettings from "./settings/Account.vue"
+import PrivacySettings from "./settings/Privacy.vue"
+import NotificationsSettings from "./settings/Notifications.vue"
+import AppearanceSettings from "./settings/Appearance.vue"
+import AdvancedSettings from "./settings/Advanced.vue"
 
 /* =========================================================
    SECTION 2: Router / Page State
@@ -20,6 +27,7 @@ const router = useRouter()
 const loading = ref(true)
 const errorMessage = ref("")
 const user = ref(null)
+const avatarError = ref(false)
 
 const activeSection = ref("voice")
 
@@ -61,6 +69,13 @@ const settingSections = [
   }
 ]
 
+const settingsComponentMap = {
+  account: AccountSettings,
+  privacy: PrivacySettings,
+  notifications: NotificationsSettings,
+  appearance: AppearanceSettings,
+  advanced: AdvancedSettings
+}
 /* =========================================================
    SECTION 3: Computed
 ========================================================= */
@@ -78,6 +93,19 @@ const userInitial = computed(() => {
   return displayName.value.charAt(0).toUpperCase()
 })
 
+const avatarUrl = computed(() => {
+  if (avatarError.value) return ""
+
+  const rawAvatarUrl = user.value?.user_metadata?.avatar_url
+  const avatarUpdatedAt = user.value?.user_metadata?.avatar_updated_at
+
+  if (!rawAvatarUrl) return ""
+  if (!avatarUpdatedAt) return rawAvatarUrl
+
+  const separator = rawAvatarUrl.includes("?") ? "&" : "?"
+  return `${rawAvatarUrl}${separator}v=${encodeURIComponent(avatarUpdatedAt)}`
+})
+
 const activeSectionTitle = computed(() => {
   const currentSection = settingSections.find((section) => {
     return section.id === activeSection.value
@@ -86,11 +114,43 @@ const activeSectionTitle = computed(() => {
   return currentSection?.label || "Settings"
 })
 
+const activeSectionDescription = computed(() => {
+  if (activeSection.value === "voice") {
+    return "Test your microphone before joining real voice channels."
+  }
+
+  if (activeSection.value === "account") {
+    return "Manage your VOXYN account overview and profile connection."
+  }
+
+  if (activeSection.value === "privacy") {
+    return "Control room safety, identity visibility, and future privacy options."
+  }
+
+  if (activeSection.value === "notifications") {
+    return "Prepare alerts for rooms, messages, voice activity, and game events."
+  }
+
+  if (activeSection.value === "appearance") {
+    return "Customize the VOXYN interface style and visual comfort."
+  }
+
+  if (activeSection.value === "advanced") {
+    return "View server, browser, and local development information."
+  }
+
+  return "This section is prepared for future VOXYN settings."
+})
+
+const activeSettingsComponent = computed(() => {
+  return settingsComponentMap[activeSection.value] || null
+})
 /* =========================================================
    SECTION 4: Page Init
    Purpose:
    - Protect settings page
    - Redirect if user is not logged in
+   - Load latest Supabase user metadata for avatar sync
 ========================================================= */
 onMounted(async () => {
   await loadSettingsPage()
@@ -115,13 +175,33 @@ async function loadSettingsPage() {
     return
   }
 
-  user.value = data.session.user
+  const { data: latestUserData, error: userError } = await supabase.auth.getUser()
+
+  if (userError) {
+    console.warn("Settings latest user error:", userError.message)
+  }
+
+  user.value = latestUserData?.user || data.session.user
+  avatarError.value = false
   loading.value = false
+}
+
+function handleAvatarError() {
+  avatarError.value = true
 }
 
 /* =========================================================
    SECTION 5: Navigation
 ========================================================= */
+function selectSettingSection(sectionId) {
+  if (sectionId === "profile") {
+    router.push("/profile")
+    return
+  }
+
+  activeSection.value = sectionId
+}
+
 function backToDashboard() {
   router.push("/dashboard")
 }
@@ -129,6 +209,7 @@ function backToDashboard() {
 function closeSettings() {
   router.back()
 }
+
 </script>
 
 <template>
@@ -139,7 +220,14 @@ function closeSettings() {
     <aside class="settings-sidebar">
       <button class="user-card" @click="router.push('/profile')">
         <span class="user-avatar">
-          {{ userInitial }}
+          <img
+            v-if="avatarUrl"
+            :src="avatarUrl"
+            alt="Profile avatar"
+            class="user-avatar-img"
+            @error="handleAvatarError"
+          />
+          <span v-else>{{ userInitial }}</span>
         </span>
 
         <span class="user-info">
@@ -158,7 +246,7 @@ function closeSettings() {
           v-for="section in settingSections"
           :key="section.id"
           :class="{ active: activeSection === section.id }"
-          @click="activeSection = section.id"
+          @click="selectSettingSection(section.id)"
         >
           <span class="nav-icon">{{ section.icon }}</span>
           <span>{{ section.label }}</span>
@@ -190,12 +278,8 @@ function closeSettings() {
           <h1>Settings</h1>
           <h2>{{ activeSectionTitle }}</h2>
 
-          <span v-if="activeSection === 'voice'">
-            Test your microphone before joining real voice channels.
-          </span>
-
-          <span v-else>
-            This section is prepared for future VOXYN settings.
+          <span>
+            {{ activeSectionDescription }}
           </span>
         </header>
 
@@ -251,18 +335,15 @@ function closeSettings() {
         <!-- ===============================================
              SECTION 3B: Placeholder Sections
         ================================================ -->
-        <section v-else class="placeholder-section">
-          <div class="placeholder-card">
-            <div class="placeholder-icon">
-              {{ settingSections.find((section) => section.id === activeSection)?.icon }}
-            </div>
-
-            <p class="eyebrow">COMING SOON</p>
-            <h2>{{ activeSectionTitle }}</h2>
-            <span>
-              This settings section is reserved for a future VOXYN update.
-            </span>
-          </div>
+        <section v-else class="settings-section-wrapper">
+          <component
+            :is="activeSettingsComponent"
+            :user="user"
+            :display-name="displayName"
+            :email="user?.email || ''"
+            :avatar-url="avatarUrl"
+            @open-profile="router.push('/profile')"
+          />
         </section>
       </section>
     </section>
@@ -351,11 +432,19 @@ function closeSettings() {
   place-items: center;
 
   border-radius: 18px;
+  overflow: hidden;
   color: white;
   background: linear-gradient(135deg, #38bdf8, #4f46e5);
 
   font-size: 18px;
   font-weight: 950;
+}
+
+.user-avatar-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .user-info {

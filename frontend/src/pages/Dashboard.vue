@@ -186,6 +186,42 @@ const latestRoomCode = computed(() => {
   if (!recentRooms.value.length) return "None"
   return recentRooms.value[0].room_code
 })
+
+const currentAccessUrl = computed(() => {
+  if (typeof window === "undefined") return "Unavailable"
+
+  return window.location.origin
+})
+
+const isPublicAccess = computed(() => {
+  if (typeof window === "undefined") return false
+
+  const hostname = window.location.hostname
+
+  return (
+    hostname !== "localhost" &&
+    hostname !== "127.0.0.1" &&
+    hostname !== ""
+  )
+})
+
+const accessModeLabel = computed(() => {
+  return isPublicAccess.value ? "Public Tunnel Active" : "Local Development"
+})
+
+const accessModeDetail = computed(() => {
+  if (isPublicAccess.value) {
+    return "Friends can use this public URL while your server is running."
+  }
+
+  return "Localhost is only for development on this device."
+})
+
+const latestRoomDisplay = computed(() => {
+  if (latestRoomCode.value === "None") return "Create a room first"
+
+  return latestRoomCode.value
+})
 /* =========================================================
    SECTION 6.5: Profile Identity Display
    Purpose:
@@ -494,8 +530,14 @@ async function joinRoom() {
    Purpose:
    - Enter a recent room
    - Copy room code for sharing
+   - Copy server access link for public testing
 ========================================================= */
 function enterRoom(code) {
+  if (!code || code === "None") {
+    errorMessage.value = "Create a room first."
+    return
+  }
+
   router.push(`/room/${code}`)
 }
 
@@ -503,13 +545,52 @@ async function copyRoomCode(code) {
   errorMessage.value = ""
   successMessage.value = ""
 
+  if (!code || code === "None") {
+    errorMessage.value = "Create a room first."
+    return
+  }
+
   try {
     await navigator.clipboard.writeText(code)
     successMessage.value = `Room code ${code} copied.`
   } catch {
     errorMessage.value = "Could not copy room code."
   }
-}/* =========================================================
+}
+
+async function copyAccessLink() {
+  errorMessage.value = ""
+  successMessage.value = ""
+
+  try {
+    await navigator.clipboard.writeText(currentAccessUrl.value)
+    successMessage.value = "Access link copied."
+  } catch {
+    errorMessage.value = "Could not copy access link."
+  }
+}
+
+async function copyLatestRoomInvite() {
+  errorMessage.value = ""
+  successMessage.value = ""
+
+  if (latestRoomCode.value === "None") {
+    errorMessage.value = "Create a room first."
+    return
+  }
+
+  try {
+    const inviteLink = `${currentAccessUrl.value}/room/${latestRoomCode.value}`
+
+    await navigator.clipboard.writeText(inviteLink)
+
+    successMessage.value = `Invite link for ${latestRoomCode.value} copied.`
+  } catch {
+    errorMessage.value = "Could not copy invite link."
+  }
+}
+
+/* =========================================================
    SECTION 13.5: Delete Room
    Purpose:
    - Allow user to manually delete an owned room
@@ -1066,29 +1147,67 @@ async function signOut() {
           </div>
 
           <!-- =============================================
-               SECTION 13C: Access Panel
-               Purpose:
-               - Useful for local MVP / future public testing
+              SECTION 13C: Access Panel
+              Purpose:
+              - Show current server access URL
+              - Explain VOXYN public URL + room code flow
+              - Provide quick copy actions for testing
           ============================================== -->
           <div class="bottom-panel access-panel">
-            <p class="panel-label">Access</p>
-            <h2>Server Access</h2>
+            <div class="access-panel-header">
+              <div>
+                <p class="panel-label">Access</p>
+                <h2>Invite & Server Access</h2>
+              </div>
+
+              <span
+                class="access-mode-pill"
+                :class="{ public: isPublicAccess }"
+              >
+                {{ accessModeLabel }}
+              </span>
+            </div>
 
             <div class="access-list">
-              <div>
-                <span>Local URL</span>
-                <strong>localhost:5173</strong>
+              <div class="access-card main-access-card">
+                <span>Current Access URL</span>
+                <strong>{{ currentAccessUrl }}</strong>
+                <p>{{ accessModeDetail }}</p>
               </div>
 
-              <div>
-                <span>Public Tunnel</span>
-                <strong>Not connected</strong>
+              <div class="access-card">
+                <span>Join Rule</span>
+                <strong>URL + Room Code</strong>
+                <p>Friends open this server URL, then enter a room code.</p>
               </div>
 
-              <div>
-                <span>Room Code Flow</span>
-                <strong>Required</strong>
+              <div class="access-card">
+                <span>Latest Room Code</span>
+                <strong>{{ latestRoomDisplay }}</strong>
+                <p>Room codes only work inside this VOXYN server instance.</p>
               </div>
+            </div>
+
+            <div class="access-actions">
+              <button class="access-action-btn" @click="copyAccessLink">
+                Copy Access Link
+              </button>
+
+              <button
+                class="access-action-btn"
+                :disabled="latestRoomCode === 'None'"
+                @click="copyLatestRoomInvite"
+              >
+                Copy Invite Link
+              </button>
+
+              <button
+                class="access-action-btn primary"
+                :disabled="latestRoomCode === 'None'"
+                @click="enterRoom(latestRoomCode)"
+              >
+                Open Latest Room
+              </button>
             </div>
           </div>
         </section>
@@ -2226,32 +2345,132 @@ button:disabled {
 /* =========================================================
    SECTION 18: Access Panel
    Purpose:
-   - Local MVP and future public testing info
+   - Show current public/local server access
+   - Explain URL + room code flow
+   - Provide useful testing actions
 ========================================================= */
+.access-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.access-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.access-mode-pill {
+  min-height: 34px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  font-size: 12px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.access-mode-pill.public {
+  color: #15803d;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
 .access-list {
   display: grid;
   gap: 12px;
   margin-top: 22px;
 }
 
-.access-list div {
-  padding: 14px;
+.access-card {
+  padding: 15px;
   border-radius: 18px;
   background: linear-gradient(135deg, #f8fafc, #eff6ff);
   border: 1px solid #e2e8f0;
 }
 
-.access-list span {
-  display: block;
-  margin-bottom: 5px;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 850;
+.main-access-card {
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 35%),
+    linear-gradient(135deg, #ffffff, #eff6ff);
+  border-color: #bae6fd;
 }
 
-.access-list strong {
+.access-card span {
+  display: block;
+  margin-bottom: 7px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.access-card strong {
+  display: block;
   color: #111827;
   font-size: 14px;
+  font-weight: 950;
+  word-break: break-all;
+}
+
+.access-card p {
+  margin: 7px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.access-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.access-action-btn {
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 15px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.access-action-btn:hover {
+  color: #0369a1;
+  border-color: #38bdf8;
+  background: white;
+}
+
+.access-action-btn.primary {
+  color: white;
+  border-color: transparent;
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.18);
+}
+
+.access-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+@media (max-width: 720px) {
+  .access-panel-header {
+    flex-direction: column;
+  }
+
+  .access-actions {
+    grid-template-columns: 1fr;
+  }
 }
 /* =========================================================
    SECTION 19: Half Screen Layout

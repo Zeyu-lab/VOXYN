@@ -7,6 +7,10 @@ function goToLogin() {
   router.push("/login")
 }
 
+function goToSignup() {
+  router.push("/signup")
+}
+
 function goHome() {
   router.push("/")
 }
@@ -15,26 +19,37 @@ function goHome() {
 <template>
   <main class="home-page">
     <!-- =========================================================
-      SECTION 01: TOP BAR / 顶部导航
-    ========================================================== -->
-    <header class="top-bar">
-      <div class="top-bar-logo" @click="goHome">
-        <div class="logo-mark">V</div>
-        <span>VOXYN</span>
-      </div>
+        SECTION 01: TOP BAR / 顶部导航
+      ========================================================== -->
+      <header class="top-bar">
+        <div class="top-bar-inner">
+          <div class="top-bar-logo" @click="goHome">
+            <div class="logo-mark">◆</div>
 
-      <nav class="top-bar-nav">
-        <a href="#story">Product</a>
-        <a href="#features">Features</a>
-        <a href="#tech-stack">Tech Stack</a>
-        <a href="#roadmap">Roadmap</a>
-      </nav>
+            <div class="logo-text">
+              <span>VOXYN</span>
+              <small>Social Room Platform</small>
+            </div>
+          </div>
 
-      <div class="top-bar-actions">
-        <button class="login-button" @click="goToLogin">Log in</button>
-        <button class="nav-cta-button" @click="goToLogin">Get Started</button>
-      </div>
-    </header>
+          <nav class="top-bar-nav">
+            <a href="#story">Product</a>
+            <a href="#features">Features</a>
+            <a href="#tech-stack">Tech Stack</a>
+            <a href="#roadmap">Roadmap</a>
+          </nav>
+
+          <div class="top-bar-actions">
+            <button class="login-button" @click="goToLogin">
+              Log in
+            </button>
+
+            <button class="nav-cta-button" @click="goToSignup">
+              Get Started
+            </button>
+          </div>
+        </div>
+      </header>
 
     <!-- =========================================================
       SECTION 02: HERO / 首页主视觉
@@ -125,9 +140,9 @@ function goHome() {
             class="hero-promo-card"
             role="button"
             tabindex="0"
-            @click="goToLogin"
-            @keydown.enter="goToLogin"
-            @keydown.space.prevent="goToLogin"
+            @click="goToSignup"
+            @keydown.enter="goToSignup"
+            @keydown.space.prevent="goToSignup"
           >
             <div class="promo-card-top">
               <span class="promo-kicker">ROOM SYSTEM PREVIEW</span>
@@ -373,10 +388,18 @@ function goHome() {
       <p class="section-tag light">START BUILDING</p>
       <h2>Ready to enter VOXYN?</h2>
       <p>
-        Start from the login page and continue building the full room experience.
+        Create an account, log in, and continue building the full room experience.
       </p>
 
-      <button @click="goToLogin">Get Started</button>
+      <div class="bottom-cta-actions">
+        <button class="bottom-primary-button" @click="goToSignup">
+          Create account
+        </button>
+
+        <button class="bottom-secondary-button" @click="goToLogin">
+          Log in
+        </button>
+      </div>
     </section>
   </main>
 </template>
@@ -397,100 +420,159 @@ function goHome() {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "Segoe UI", sans-serif;
 }
-
 /* =========================================================
   SECTION 01: TOP BAR / 顶部导航
 ========================================================= */
 .top-bar {
-  height: 96px;
-  padding: 0 6%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #ffffff;
   position: sticky;
   top: 0;
   z-index: 50;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+
+  padding: 14px 6%;
+  background: rgba(255, 255, 255, 0.78);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  backdrop-filter: blur(22px);
+}
+
+.top-bar-inner {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 34px;
 }
 
 .top-bar-logo {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+
   cursor: pointer;
   user-select: none;
 }
 
 .logo-mark {
-  width: 56px;
-  height: 56px;
-  border: 4px solid #075b93;
-  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+
   display: grid;
   place-items: center;
-  color: #075b93;
-  font-size: 26px;
-  font-weight: 900;
-  line-height: 1;
+
+  border: 1px solid rgba(79, 70, 229, 0.2);
+  border-radius: 16px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  box-shadow: 0 14px 34px rgba(79, 70, 229, 0.22);
+
+  font-size: 15px;
+  font-weight: 950;
 }
 
-.top-bar-logo span {
-  font-size: 34px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  color: #075b93;
+.logo-text {
+  display: grid;
+  gap: 2px;
+}
+
+.logo-text span {
+  color: #0f172a;
+  letter-spacing: 0.26em;
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.logo-text small {
+  color: #64748b;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 850;
 }
 
 .top-bar-nav {
+  justify-self: center;
+
+  padding: 8px;
+
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 6px;
+
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
 }
 
 .top-bar-nav a {
-  color: #1f2937;
+  padding: 10px 16px;
+
+  border-radius: 999px;
+  color: #475569;
   text-decoration: none;
-  font-size: 16px;
-  font-weight: 700;
-  transition: color 0.2s ease;
+
+  font-size: 14px;
+  font-weight: 850;
+
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 
 .top-bar-nav a:hover {
-  color: #0b6fc9;
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.09);
+  transform: translateY(-1px);
 }
 
 .top-bar-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+
+.login-button,
+.nav-cta-button {
+  min-height: 44px;
+  padding: 0 18px;
+
+  border-radius: 999px;
+  cursor: pointer;
+
+  font-size: 14px;
+  font-weight: 900;
+
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .login-button {
-  border: none;
-  background: transparent;
-  color: #1f2937;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #334155;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.login-button:hover {
+  color: #4f46e5;
+  background: rgba(255, 255, 255, 0.94);
+  transform: translateY(-1px);
 }
 
 .nav-cta-button {
-  border: none;
-  padding: 14px 24px;
-  border-radius: 16px;
-  background: #111827;
+  border: 0;
   color: #ffffff;
-  font-size: 16px;
-  font-weight: 900;
-  cursor: pointer;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: linear-gradient(135deg, #2563eb, #6d5dfc);
+  box-shadow: 0 14px 32px rgba(79, 70, 229, 0.24);
 }
 
 .nav-cta-button:hover {
   transform: translateY(-2px);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.24);
+  box-shadow: 0 18px 42px rgba(79, 70, 229, 0.3);
 }
 
 /* =========================================================
@@ -1271,16 +1353,41 @@ function goHome() {
   line-height: 1.6;
 }
 
-.bottom-cta-section button {
+.bottom-cta-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.bottom-primary-button,
+.bottom-secondary-button {
   border: none;
   padding: 18px 34px;
   border-radius: 18px;
-  background: #ffffff;
-  color: #075b93;
   font-size: 17px;
   font-weight: 900;
   cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.bottom-primary-button {
+  background: #ffffff;
+  color: #075b93;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.18);
+}
+
+.bottom-secondary-button {
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+  backdrop-filter: blur(16px);
+}
+
+.bottom-primary-button:hover,
+.bottom-secondary-button:hover {
+  transform: translateY(-2px);
 }
 
 /* =========================================================
@@ -1317,25 +1424,33 @@ function goHome() {
 }
 
 @media (max-width: 960px) {
-  .top-bar {
-    height: auto;
-    padding: 20px 6%;
-    gap: 18px;
-  }
+    .top-bar {
+      padding: 12px 5%;
+    }
 
-  .top-bar-nav {
-    display: none;
-  }
+    .top-bar-inner {
+      grid-template-columns: auto auto;
+      justify-content: space-between;
+      gap: 18px;
+    }
 
-  .logo-mark {
-    width: 48px;
-    height: 48px;
-    font-size: 22px;
-  }
+    .top-bar-nav {
+      display: none;
+    }
 
-  .top-bar-logo span {
-    font-size: 28px;
-  }
+    .logo-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 15px;
+    }
+
+    .logo-text span {
+      font-size: 21px;
+    }
+
+    .logo-text small {
+      display: none;
+    }
 
   .hero-section {
     padding-top: 60px;
@@ -1389,12 +1504,24 @@ function goHome() {
 }
 
 @media (max-width: 640px) {
-  .top-bar {
-    align-items: flex-start;
+  .top-bar-inner {
+    gap: 12px;
+  }
+
+  .logo-mark {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    font-size: 13px;
+  }
+
+  .logo-text span {
+    font-size: 18px;
+    letter-spacing: 0.2em;
   }
 
   .top-bar-actions {
-    gap: 10px;
+    gap: 8px;
   }
 
   .login-button {
@@ -1402,8 +1529,9 @@ function goHome() {
   }
 
   .nav-cta-button {
-    padding: 12px 18px;
-    font-size: 14px;
+    min-height: 40px;
+    padding: 0 15px;
+    font-size: 13px;
   }
 
   .hero-section {
