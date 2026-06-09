@@ -52,13 +52,13 @@ const members = ref([])
 const socketConnected = ref(false)
 const onlineUsers = ref([])
 
-
 /* =========================================================
    SECTION 3.2: WebRTC Voice State
    Purpose:
    - Use isolated WebRTC voice logic from src/webrtc
    - Keep RoomView focused on UI and room behavior
    - Prepare remote audio elements for real WebRTC playback
+   - Keep Game Screen headphone control connected to real audio
 ========================================================= */
 console.log("useVoiceRoom loaded")
 
@@ -82,6 +82,8 @@ const {
   cleanupVoiceRoom
 } = useVoiceRoom()
 
+const remoteAudioElements = new Map()
+
 const remoteAudioItems = computed(() => {
   return Object.entries(remoteStreams.value).map(([socketId, stream]) => {
     return {
@@ -91,19 +93,42 @@ const remoteAudioItems = computed(() => {
   })
 })
 
-function bindRemoteAudioElement(element, stream) {
-  if (!element || !stream) return
+function syncRemoteAudioMuteState() {
+  remoteAudioElements.forEach((element) => {
+    if (!element) return
+
+    element.muted = isDeafened.value
+    element.volume = isDeafened.value ? 0 : 1
+  })
+}
+
+function bindRemoteAudioElement(element, stream, socketId) {
+  if (!socketId) return
+
+  if (!element) {
+    remoteAudioElements.delete(socketId)
+    return
+  }
+
+  remoteAudioElements.set(socketId, element)
 
   if (element.srcObject !== stream) {
     element.srcObject = stream
   }
 
+  element.autoplay = true
+  element.playsInline = true
   element.muted = isDeafened.value
+  element.volume = isDeafened.value ? 0 : 1
 
   element.play().catch((error) => {
     console.warn("VOXYN voice: remote audio play blocked", error)
   })
 }
+
+watch(isDeafened, () => {
+  syncRemoteAudioMuteState()
+})
 
 /* =========================================================
    SECTION 4: Current Room Control Strip State
@@ -113,6 +138,7 @@ function bindRemoteAudioElement(element, stream) {
    - Keep RoomView focused on using the current room
 ========================================================= */
 const roomControlSubtitle = "Invite friends, manage voice, and keep this room active."
+
 /* =========================================================
    SECTION 5: UI State
    Purpose:
@@ -255,6 +281,124 @@ const chatMessages = ref([
     type: "system"
   }
 ])
+/* =========================================================
+   SECTION 5.01: Room Stage / Game Screen State
+   Purpose:
+   - Stage 1 stays as Room Workspace
+   - Stage 2 becomes Game Focus Mode
+   - Game Screen controls use real WebRTC voice state
+========================================================= */
+const roomStage = ref("workspace")
+const gameFrameRef = ref(null)
+const isStageOneGameFullscreen = ref(false)
+
+const gameLatencyLabel = "24ms"
+
+const isGameFocusMode = computed(() => {
+  return roomStage.value === "game-focus"
+})
+
+const gameStageTitle = computed(() => {
+  return isGameFocusMode.value ? "Game Focus Mode" : "Game Area"
+})
+
+const gameStageSubtitle = computed(() => {
+  return isGameFocusMode.value
+    ? "Focus on the game while voice and chat stay connected."
+    : "Gather your team and start playing."
+})
+
+const primaryGameButtonLabel = computed(() => {
+  return isGameFocusMode.value ? "↩ Back to Room" : "▶ Start Game"
+})
+
+const gameVoiceStatusLabel = computed(() => {
+  if (!hasJoinedVoice.value) {
+    return "Voice not connected"
+  }
+
+  if (isDeafened.value) {
+    return "Deafened"
+  }
+
+  if (!isMicOn.value) {
+    return "Muted / Listening"
+  }
+
+  if (isSpeaking.value) {
+    return "Speaking"
+  }
+
+  return "Mic on / Listening"
+})
+
+/* =========================================================
+   SECTION 5.02: Room Stage / Game Screen Actions
+   Purpose:
+   - Toggle Stage 1 / Stage 2 without destroying voice state
+   - Bind Game Screen mic and headphone buttons to real WebRTC
+========================================================= */
+function enterStageTwoGame() {
+  roomStage.value = "game-focus"
+  selectedTab.value = "Game"
+  successMessage.value = ""
+}
+
+function exitStageTwoGame() {
+  roomStage.value = "workspace"
+  selectedTab.value = "Game"
+  successMessage.value = ""
+}
+
+function toggleGameFocusMode() {
+  if (isGameFocusMode.value) {
+    exitStageTwoGame()
+    return
+  }
+
+  enterStageTwoGame()
+}
+
+async function toggleStageOneGameFullscreen() {
+  toggleGameFocusMode()
+}
+
+function updateStageOneFullscreenState() {
+  isStageOneGameFullscreen.value = false
+}
+
+function handleStageOneFullscreenShortcut(event) {
+  const activeTag = document.activeElement?.tagName?.toLowerCase()
+
+  if (activeTag === "input" || activeTag === "textarea") return
+  if (event.key?.toLowerCase() !== "f") return
+  if (!gameFrameRef.value) return
+
+  event.preventDefault()
+  toggleGameFocusMode()
+}
+
+async function toggleGameScreenMicrophone() {
+  errorMessage.value = ""
+
+  if (!hasJoinedVoice.value) {
+    await joinVoiceChannel(selectedVoiceChannel.value || defaultVoiceChannel)
+    return
+  }
+
+  await toggleRoomMicrophone()
+}
+
+async function toggleGameScreenHeadphones() {
+  errorMessage.value = ""
+
+  if (!hasJoinedVoice.value) {
+    await joinVoiceChannel(selectedVoiceChannel.value || defaultVoiceChannel)
+    return
+  }
+
+  await toggleRoomHeadphones()
+}
 
 /* =========================================================
    SECTION 5.1: Voice Channel Actions
@@ -642,6 +786,7 @@ watch(
   }
 )
 
+
 /* =========================================================
    SECTION 6: Computed Room Data
    Purpose:
@@ -800,10 +945,18 @@ function getUserInitial(name) {
    - Connect to Socket.IO room
 ========================================================= */
 onMounted(async () => {
+  document.addEventListener("fullscreenchange", updateStageOneFullscreenState)
+  document.addEventListener("webkitfullscreenchange", updateStageOneFullscreenState)
+  document.addEventListener("keydown", handleStageOneFullscreenShortcut)
+
   await loadRoomPage()
 })
 
 onBeforeUnmount(() => {
+  document.removeEventListener("fullscreenchange", updateStageOneFullscreenState)
+  document.removeEventListener("webkitfullscreenchange", updateStageOneFullscreenState)
+  document.removeEventListener("keydown", handleStageOneFullscreenShortcut)
+
   cleanupVoiceRoom()
   leaveSocketRoom(true)
 })
@@ -1301,7 +1454,10 @@ function formatChatTime(timestamp) {
 </script>
 
 <template>
-  <main class="room-page">
+  <main
+    class="room-page"
+    :class="{ 'game-focus-mode': isGameFocusMode }"
+  >
     <!-- =====================================================
          SECTION 1: Left Rail
     ====================================================== -->
@@ -1610,10 +1766,13 @@ function formatChatTime(timestamp) {
           </aside>
 
           <!-- =============================================
-               SECTION 5B: Center Workspace
+              SECTION 5B: Center Workspace
           ============================================== -->
           <section class="center-workspace">
-            <div class="member-bar">
+            <div
+              v-show="!isGameFocusMode"
+              class="member-bar"
+            >
               <div class="member-left">
                 <strong>{{ memberCount }} / {{ maxMembers }} members</strong>
                 <span>Owner: {{ ownerLabel }}</span>
@@ -1650,97 +1809,303 @@ function formatChatTime(timestamp) {
               </button>
             </div>
 
-            <div class="game-area">
-              <div class="cube-mark">◆</div>
+            <div
+              ref="gameFrameRef"
+              class="game-area stage-one-game-frame"
+              :class="{
+                'stage-one-fullscreen': isStageOneGameFullscreen,
+                'game-focus-frame': isGameFocusMode
+              }"
+            >
+              <div class="game-ambient-layer"></div>
 
-              <p>VOXYN</p>
-              <h2>Game Area</h2>
-              <span>The game is ready.</span>
-              <small>Gather your team and start playing.</small>
-
-              <button>
-                ▶ Start Game
-              </button>
-            </div>
-
-            <div class="bottom-tabs">
-              <button
-                v-for="tab in tabs"
-                :key="tab.label"
-                :class="{ active: selectedTab === tab.label }"
-                @click="selectedTab = tab.label"
-              >
-                <span class="tab-icon">{{ tab.icon }}</span>
-                <span>{{ tab.label }}</span>
-              </button>
-            </div>
-          </section>
-
-          <!-- =============================================
-               SECTION 5C: Chat Panel
-          ============================================== -->
-          <aside class="chat-card">
-            <div class="chat-header">
-              <div>
-                <h2>Chat</h2>
-                <p>Room messages</p>
-              </div>
-
-              <button aria-label="Chat options">≡</button>
-            </div>
-
-            <div class="chat-list">
               <div
-                v-for="(message, index) in chatMessages"
-                :key="`${message.sender}-${index}`"
-                class="chat-message"
-                :class="{ system: message.type === 'system' }"
+                v-if="isGameFocusMode"
+                class="stage-two-game-topbar"
               >
-                <div class="chat-avatar">
-                  <img
-                    v-if="message.avatarUrl"
-                    class="chat-avatar-img"
-                    :src="message.avatarUrl"
-                    :alt="message.sender"
-                  />
-                  <template v-else>
-                    {{ message.senderInitial || message.sender.charAt(0) }}
-                  </template>
+                <div class="stage-two-room-info">
+                  <strong>{{ roomTitle }}</strong>
+                  <span>{{ roomCode }}</span>
+                  <span>{{ memberCount }} / {{ maxMembers }}</span>
+                  <span class="stage-live-dot">● Live</span>
                 </div>
 
-                <div class="chat-bubble">
-                  <div>
-                    <strong>{{ message.sender }}</strong>
-                    <small>{{ message.time }}</small>
+                <button
+                  type="button"
+                  class="exit-stage-btn"
+                  @click="exitStageTwoGame"
+                >
+                  ↩ Exit Stage 2
+                </button>
+              </div>
+
+              <div class="game-latency-pill">
+                ▰ {{ gameLatencyLabel }}
+              </div>
+
+              <div class="game-hero-content">
+                <div class="cube-mark">◆</div>
+
+                <p>VOXYN</p>
+                <h2>{{ gameStageTitle }}</h2>
+                <span>The game is ready.</span>
+                <small>{{ gameStageSubtitle }}</small>
+
+                <button
+                  type="button"
+                  @click="toggleGameFocusMode"
+                >
+                  {{ primaryGameButtonLabel }}
+                </button>
+              </div>
+
+              <div class="game-player-controls">
+                <div class="game-control-left">
+                  <button
+                    type="button"
+                    class="game-control-btn"
+                    :class="{ active: hasJoinedVoice && !isDeafened }"
+                    :disabled="voiceJoinLoading || voiceLeaveLoading"
+                    :title="hasJoinedVoice && !isDeafened ? 'Listening' : 'Enable listening'"
+                    @click="toggleGameScreenHeadphones"
+                  >
+                    {{ hasJoinedVoice && !isDeafened ? "🎧" : "🔇" }}
+                  </button>
+
+                  <div
+                    class="game-control-slider"
+                    :class="{ 'is-muted': !hasJoinedVoice || isDeafened }"
+                  >
+                    <span
+                      :style="{ width: hasJoinedVoice && !isDeafened ? '58%' : '8%' }"
+                    ></span>
                   </div>
 
-                  <p>{{ message.text }}</p>
+                  <button
+                    type="button"
+                    class="game-control-btn"
+                    :class="{ active: hasJoinedVoice && isMicOn }"
+                    :disabled="voiceJoinLoading || voiceLeaveLoading"
+                    :title="hasJoinedVoice && isMicOn ? 'Mute microphone' : 'Enable microphone'"
+                    @click="toggleGameScreenMicrophone"
+                  >
+                    {{ hasJoinedVoice && isMicOn ? "🎙" : "◌" }}
+                  </button>
+
+                  <button
+                    type="button"
+                    class="game-control-btn"
+                    aria-label="Game settings"
+                  >
+                    ⚙
+                  </button>
+
+                  <span
+                    class="game-voice-status"
+                    :class="{
+                      connected: hasJoinedVoice,
+                      muted: hasJoinedVoice && !isMicOn,
+                      deafened: hasJoinedVoice && isDeafened,
+                      speaking: hasJoinedVoice && isSpeaking
+                    }"
+                  >
+                    {{ gameVoiceStatusLabel }}
+                  </span>
+                </div>
+
+                <div class="game-control-right">
+                  <div class="quality-pill">
+                    <span>Quality</span>
+                    <strong>Auto</strong>
+                  </div>
+
+                  <button
+                    class="fullscreen-btn"
+                    :class="{ active: isGameFocusMode }"
+                    type="button"
+                    :title="isGameFocusMode ? 'Exit Stage 2' : 'Enter Stage 2'"
+                    @click.stop="toggleGameFocusMode"
+                  >
+                    {{ isGameFocusMode ? "⤺" : "⛶" }}
+                  </button>
                 </div>
               </div>
+
+              <div class="fullscreen-hint">
+                {{ isGameFocusMode ? "Exit Stage 2 · Back to Room" : "Enter Stage 2 · Focus Mode" }}
+              </div>
             </div>
+          </section>
+          <!-- =============================================
+                  SECTION 5C: Chat Panel
+            ============================================== -->
+            <aside
+              class="chat-card"
+              :class="{ 'focus-side-card': isGameFocusMode }"
+            >
+              <div class="chat-header">
+                <div>
+                  <h2>{{ isGameFocusMode ? "Focus Panel" : "Chat" }}</h2>
+                  <p>{{ isGameFocusMode ? "Voice + room messages" : "Room messages" }}</p>
+                </div>
 
-            <div class="chat-input">
-              <input
-                v-model="chatInput"
-                type="text"
-                placeholder="Type a message..."
-                @keyup.enter="sendChatMessage"
-              />
+                <button aria-label="Chat options">≡</button>
+              </div>
 
-              <button @click="sendChatMessage">
-                ➤
-              </button>
-            </div>
-          </aside>
-        </section>
+              <div
+                v-if="isGameFocusMode"
+                class="focus-voice-card"
+              >
+                <div class="focus-card-head">
+                  <div>
+                    <p class="focus-side-title">Voice Channels</p>
+                    <span>Switch channel without leaving Stage 2</span>
+                  </div>
 
-        <p v-if="errorMessage" class="error-message">
-          {{ errorMessage }}
-        </p>
+                  <strong class="focus-count-pill">
+                    {{ currentVoiceMembers.length }}
+                  </strong>
+                </div>
 
-        <p v-if="successMessage" class="success-message">
-          {{ successMessage }}
-        </p>
+                <div class="focus-channel-list">
+                  <button
+                    v-for="channel in voiceChannels"
+                    :key="`focus-${channel.name}`"
+                    type="button"
+                    class="focus-channel-item"
+                    :class="{ active: selectedVoiceChannel === channel.name }"
+                    @click="joinVoiceChannel(channel.name)"
+                  >
+                    <span>
+                      {{ selectedVoiceChannel === channel.name ? "◉" : "○" }}
+                      {{ channel.name }}
+                    </span>
+
+                    <strong>{{ channel.count }}</strong>
+                  </button>
+                </div>
+
+                <div class="connected-users-card">
+                  <div class="focus-card-title-row">
+                    <p class="focus-side-title">Connected Users</p>
+                    <span>{{ currentVoiceMembers.length }} online</span>
+                  </div>
+
+                  <div
+                    v-if="currentVoiceMembers.length === 0"
+                    class="focus-empty-user"
+                  >
+                    No one is connected to voice.
+                  </div>
+
+                  <div
+                    v-for="voiceUser in currentVoiceMembers"
+                    :key="`focus-user-${voiceUser.id}`"
+                    class="focus-voice-user"
+                  >
+                    <div
+                      class="voice-user-avatar"
+                      :class="{
+                        'is-speaking': getVoiceUserSpeaking(voiceUser),
+                        'is-muted': !getVoiceUserMicOn(voiceUser),
+                        'is-deafened': getVoiceUserDeafened(voiceUser)
+                      }"
+                    >
+                      <img
+                        v-if="voiceUser.avatarUrl"
+                        class="voice-user-avatar-img"
+                        :src="voiceUser.avatarUrl"
+                        :alt="voiceUser.username"
+                      />
+
+                      <template v-else>
+                        {{ voiceUser.initial }}
+                      </template>
+                    </div>
+
+                    <div class="voice-user-info">
+                      <span>{{ voiceUser.username }}</span>
+
+                      <small v-if="getVoiceUserDeafened(voiceUser)">
+                        Deafened
+                      </small>
+
+                      <small v-else-if="!getVoiceUserMicOn(voiceUser)">
+                        Muted
+                      </small>
+
+                      <small v-else-if="getVoiceUserSpeaking(voiceUser)">
+                        Speaking
+                      </small>
+
+                      <small v-else>
+                        Connected
+                      </small>
+                    </div>
+
+                    <div
+                      class="focus-speaking-bars"
+                      :class="{ active: getVoiceUserSpeaking(voiceUser) }"
+                    >
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-if="isGameFocusMode"
+                class="focus-chat-title"
+              >
+                <p class="focus-side-title">Chat</p>
+                <span>Room messages</span>
+              </div>
+
+              <div class="chat-list">
+                <div
+                  v-for="(message, index) in chatMessages"
+                  :key="`${message.sender}-${index}`"
+                  class="chat-message"
+                  :class="{ system: message.type === 'system' }"
+                >
+                  <div class="chat-avatar">
+                    <img
+                      v-if="message.avatarUrl"
+                      class="chat-avatar-img"
+                      :src="message.avatarUrl"
+                      :alt="message.sender"
+                    />
+                    <template v-else>
+                      {{ message.senderInitial || message.sender.charAt(0) }}
+                    </template>
+                  </div>
+
+                  <div class="chat-bubble">
+                    <div>
+                      <strong>{{ message.sender }}</strong>
+                      <small>{{ message.time }}</small>
+                    </div>
+
+                    <p>{{ message.text }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="chat-input">
+                <input
+                  v-model="chatInput"
+                  type="text"
+                  placeholder="Type a message..."
+                  @keyup.enter="sendChatMessage"
+                />
+
+                <button @click="sendChatMessage">
+                  ➤
+                </button>
+              </div>
+            </aside>
 
             <!-- =====================================================
                 SECTION 6: Remote WebRTC Audio
@@ -1752,13 +2117,12 @@ function formatChatTime(timestamp) {
               <audio
                 v-for="item in remoteAudioItems"
                 :key="item.socketId"
-                :ref="(element) => bindRemoteAudioElement(element, item.stream)"
-                autoplay
+                :ref="(element) => bindRemoteAudioElement(element, item.stream, item.socketId)"
                 playsinline
                 data-voxyn-remote-audio
               ></audio>
             </div>
-
+        </section>
       </template>
     </section>
   </main>
@@ -1817,6 +2181,26 @@ function formatChatTime(timestamp) {
   max-width: 100%;
   min-width: 0;
   padding: 18px 22px;
+}
+
+.room-page.game-focus-mode {
+  grid-template-columns: minmax(0, 1fr);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.2), transparent 36%),
+    linear-gradient(135deg, #020617 0%, #07111f 48%, #0f172a 100%);
+}
+
+.room-page.game-focus-mode .left-rail,
+.room-page.game-focus-mode .back-btn,
+.room-page.game-focus-mode .room-header,
+.room-page.game-focus-mode .room-control-strip {
+  display: none;
+}
+
+.room-page.game-focus-mode .room-main {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 16px;
 }
 
 .back-btn {
@@ -2268,6 +2652,56 @@ function formatChatTime(timestamp) {
   align-items: stretch;
 }
 
+/* Stage 2: app-level fullscreen focus mode */
+.room-page.game-focus-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+
+  display: block;
+  overflow: hidden;
+
+  background:
+    radial-gradient(circle at 48% 0%, rgba(59, 130, 246, 0.22), transparent 36%),
+    linear-gradient(135deg, #020617 0%, #07111f 50%, #0f172a 100%);
+}
+
+.room-page.game-focus-mode .left-rail,
+.room-page.game-focus-mode .back-btn,
+.room-page.game-focus-mode .room-header,
+.room-page.game-focus-mode .room-control-strip,
+.room-page.game-focus-mode .workspace-sidebar,
+.room-page.game-focus-mode .member-bar {
+  display: none !important;
+}
+
+.room-page.game-focus-mode .room-main {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+
+  padding: 16px;
+  overflow: hidden;
+}
+
+.room-page.game-focus-mode .workspace-grid {
+  margin-top: 0;
+
+  width: 100%;
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: stretch;
+}
+
 /* =========================================================
    SECTION 6: Sidebar Cards
 ========================================================= */
@@ -2645,7 +3079,7 @@ function formatChatTime(timestamp) {
 ========================================================= */
 .center-workspace {
   display: grid;
-  grid-template-rows: 86px minmax(360px, 1fr) 58px;
+  grid-template-rows: 86px minmax(430px, 1fr);
   gap: 14px;
 }
 
@@ -2724,44 +3158,132 @@ function formatChatTime(timestamp) {
 }
 
 .game-area {
-  min-height: 390px;
+  position: relative;
+  min-height: 430px;
   display: grid;
   place-items: center;
   text-align: center;
   padding: 28px;
   color: white;
-  background:
-    radial-gradient(circle at center, rgba(99, 102, 241, 0.28), transparent 30%),
-    linear-gradient(135deg, #020617, #111c44);
   overflow: hidden;
+  isolation: isolate;
+
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(148, 163, 184, 0.26), transparent 20%),
+    radial-gradient(circle at 50% 16%, rgba(96, 165, 250, 0.36), transparent 24%),
+    radial-gradient(circle at 82% 82%, rgba(79, 70, 229, 0.3), transparent 32%),
+    linear-gradient(135deg, #020617 0%, #061436 46%, #101b46 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 42px rgba(15, 23, 42, 0.14);
+}
+
+.stage-one-game-frame {
+  cursor: default;
+}
+
+.game-ambient-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+
+  background:
+    linear-gradient(to top, rgba(2, 6, 23, 0.9), transparent 46%),
+    repeating-linear-gradient(
+      135deg,
+      rgba(96, 165, 250, 0.08) 0,
+      rgba(96, 165, 250, 0.08) 1px,
+      transparent 1px,
+      transparent 44px
+    );
+  opacity: 0.88;
+}
+
+.game-ambient-layer::before {
+  content: "";
+  position: absolute;
+  left: 8%;
+  top: 8%;
+  width: 180px;
+  height: 180px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  box-shadow: inset -18px -20px 42px rgba(15, 23, 42, 0.42);
+}
+
+.game-ambient-layer::after {
+  content: "";
+  position: absolute;
+  left: -12%;
+  right: -12%;
+  bottom: -18%;
+  height: 42%;
+  background: radial-gradient(ellipse at center, rgba(59, 130, 246, 0.3), transparent 64%);
+  filter: blur(16px);
+}
+
+.game-latency-pill {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 4;
+
+  min-height: 32px;
+  padding: 0 12px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  border-radius: 999px;
+  color: #dcfce7;
+  background: rgba(2, 6, 23, 0.68);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  backdrop-filter: blur(14px);
+
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.game-hero-content {
+  position: relative;
+  z-index: 2;
+
+  display: grid;
+  justify-items: center;
 }
 
 .cube-mark {
-  width: 76px;
-  height: 76px;
+  width: 78px;
+  height: 78px;
   display: grid;
   place-items: center;
   border-radius: 24px;
   color: white;
   background: linear-gradient(135deg, #3b82f6, #6366f1);
   font-size: 32px;
-  box-shadow: 0 20px 56px rgba(59, 130, 246, 0.28);
+  box-shadow:
+    0 22px 58px rgba(59, 130, 246, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .game-area p {
-  margin: 22px 0 0;
+  margin: 24px 0 0;
   color: white;
-  font-size: 32px;
+  font-size: 40px;
   font-weight: 950;
   letter-spacing: 0.34em;
+  text-shadow: 0 16px 50px rgba(15, 23, 42, 0.68);
 }
 
 .game-area h2 {
-  margin: 8px 0 22px;
+  margin: 10px 0 20px;
   color: #cbd5e1;
-  font-size: 18px;
+  font-size: 17px;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.26em;
 }
 
 .game-area span {
@@ -2773,65 +3295,293 @@ function formatChatTime(timestamp) {
 .game-area small {
   display: block;
   margin-top: 8px;
-  color: #cbd5e1;
+  color: #dbeafe;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 750;
 }
 
-.game-area button {
-  margin-top: 28px;
-  min-height: 52px;
-  padding: 0 30px;
+.game-hero-content > button {
+  margin-top: 30px;
+  min-height: 54px;
+  padding: 0 34px;
+
   border: none;
   border-radius: 999px;
-  color: #4f46e5;
-  background: white;
+  color: white;
+  background: linear-gradient(135deg, #3b82f6, #4f46e5);
+
   font-size: 15px;
   font-weight: 950;
   cursor: pointer;
+
+  box-shadow: 0 18px 44px rgba(59, 130, 246, 0.34);
 }
 
-.bottom-tabs {
-  min-height: 58px;
-  padding: 8px;
+.game-player-controls {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+  z-index: 4;
+
+  min-height: 54px;
+  padding: 8px 10px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+
+  border-radius: 18px;
+  background: rgba(2, 6, 23, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.game-control-left,
+.game-control-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.game-player-controls button {
+  width: 38px;
+  height: 38px;
+
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  place-items: center;
+
+  border-radius: 13px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: white;
+  background: rgba(15, 23, 42, 0.66);
+  cursor: pointer;
 }
 
-.bottom-tabs button {
-  border: none;
-  border-radius: 15px;
-  background: transparent;
-  color: #64748b;
-  font-weight: 950;
-  cursor: pointer;
+.game-control-slider {
+  width: 98px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.42);
+  overflow: hidden;
+}
+
+.game-control-slider span {
+  display: block;
+  width: 44%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #60a5fa, #6366f1);
+}
+
+.quality-pill {
+  min-height: 38px;
+  padding: 0 13px;
 
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 9px;
+  gap: 8px;
 
+  border-radius: 13px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.66);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.quality-pill strong {
+  color: white;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.fullscreen-btn {
+  box-shadow:
+    0 0 0 2px rgba(96, 165, 250, 0.22),
+    0 10px 26px rgba(15, 23, 42, 0.32);
+}
+
+.fullscreen-hint {
+  position: absolute;
+  right: 18px;
+  bottom: 80px;
+  z-index: 4;
+
+  padding: 8px 11px;
+  border-radius: 11px;
+
+  color: white;
+  background: rgba(2, 6, 23, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  backdrop-filter: blur(12px);
+
+  font-size: 11px;
+  font-weight: 900;
+  opacity: 0;
+  transform: translateY(6px);
   transition:
-    background 0.18s ease,
-    color 0.18s ease,
+    opacity 0.18s ease,
     transform 0.18s ease;
 }
 
-.bottom-tabs button:hover {
-  transform: translateY(-1px);
-  background: #f8fafc;
+.stage-one-game-frame:hover .fullscreen-hint {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.bottom-tabs button.active {
-  color: #4f46e5;
-  background: #eef2ff;
+.stage-one-game-frame:fullscreen,
+.stage-one-game-frame:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  border-radius: 0;
 }
 
-.tab-icon {
-  font-size: 16px;
-  line-height: 1;
+.stage-one-game-frame:fullscreen p,
+.stage-one-game-frame:-webkit-full-screen p {
+  font-size: clamp(42px, 7vw, 96px);
 }
+
+.stage-one-game-frame:fullscreen .game-player-controls,
+.stage-one-game-frame:-webkit-full-screen .game-player-controls {
+  left: 40px;
+  right: 40px;
+  bottom: 34px;
+}
+
+.stage-one-fullscreen {
+  min-height: 100vh;
+}
+.room-page.game-focus-mode .center-workspace {
+  min-height: calc(100vh - 32px);
+  min-height: calc(100dvh - 32px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.room-page.game-focus-mode .game-area {
+  min-height: calc(100vh - 32px);
+  min-height: calc(100dvh - 32px);
+  border-radius: 24px;
+}
+
+.game-focus-frame {
+  padding-top: 76px;
+}
+
+.stage-two-game-topbar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  z-index: 6;
+
+  min-height: 48px;
+  padding: 8px 10px 8px 16px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+
+  border-radius: 16px;
+  background: rgba(2, 6, 23, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  backdrop-filter: blur(18px);
+}
+
+.stage-two-room-info {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.stage-two-room-info strong {
+  color: white;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.stage-live-dot {
+  color: #22c55e;
+}
+
+.exit-stage-btn {
+  min-height: 34px;
+  padding: 0 14px;
+
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+
+  color: white;
+  background: rgba(15, 23, 42, 0.78);
+
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.game-player-controls button.active {
+  color: white;
+  background: rgba(37, 99, 235, 0.86);
+  border-color: rgba(96, 165, 250, 0.58);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.16);
+}
+
+.game-player-controls button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+}
+
+.game-control-slider.is-muted span {
+  background: #64748b;
+}
+
+.game-voice-status {
+  min-height: 28px;
+  padding: 0 10px;
+
+  display: inline-flex;
+  align-items: center;
+
+  border-radius: 999px;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.game-voice-status.connected {
+  color: #bfdbfe;
+}
+
+.game-voice-status.speaking {
+  color: #bbf7d0;
+  border-color: rgba(34, 197, 94, 0.36);
+}
+
+.game-voice-status.muted,
+.game-voice-status.deafened {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.32);
+}
+
+.fullscreen-btn.active {
+  color: white;
+  background: rgba(79, 70, 229, 0.92);
+  border-color: rgba(129, 140, 248, 0.62);
+}
+
 
 /* =========================================================
    SECTION 8: Chat
@@ -2964,6 +3714,272 @@ function formatChatTime(timestamp) {
   color: white;
   background: linear-gradient(135deg, #3b82f6, #4f46e5);
   cursor: pointer;
+}
+
+.room-page.game-focus-mode .chat-card {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.24);
+  backdrop-filter: blur(18px);
+}
+
+.room-page.game-focus-mode .chat-header h2 {
+  color: white;
+}
+
+.room-page.game-focus-mode .chat-header p {
+  color: #94a3b8;
+}
+
+.room-page.game-focus-mode .chat-header button {
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
+.focus-voice-card {
+  margin-top: 14px;
+  padding: 12px;
+
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.42));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.focus-card-head {
+  margin-bottom: 12px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.focus-card-head span,
+.focus-card-title-row span,
+.focus-chat-title span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.focus-side-title {
+  margin: 0;
+
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.focus-count-pill {
+  min-width: 30px;
+  height: 26px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(129, 140, 248, 0.22);
+
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.focus-channel-list {
+  display: grid;
+  gap: 8px;
+}
+
+.focus-channel-item {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  border-radius: 13px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.46);
+
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.focus-channel-item.active {
+  color: white;
+  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  border-color: rgba(129, 140, 248, 0.42);
+  box-shadow: 0 12px 24px rgba(79, 70, 229, 0.18);
+}
+
+.focus-channel-item strong {
+  min-width: 24px;
+  height: 24px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 999px;
+  color: #c7d2fe;
+  background: rgba(255, 255, 255, 0.12);
+
+  font-size: 11px;
+}
+
+.connected-users-card {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.focus-card-title-row,
+.focus-chat-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.focus-empty-user {
+  margin-top: 10px;
+  padding: 12px;
+
+  border-radius: 14px;
+  color: #64748b;
+  background: rgba(2, 6, 23, 0.28);
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.focus-voice-user {
+  min-height: 46px;
+  margin-top: 10px;
+  padding: 7px 8px;
+
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 10px;
+
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.48);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.room-page.game-focus-mode .voice-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.room-page.game-focus-mode .voice-user-info span {
+  color: #e2e8f0;
+}
+
+.room-page.game-focus-mode .voice-user-info small {
+  color: #94a3b8;
+}
+
+.focus-speaking-bars {
+  height: 26px;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+
+  opacity: 0.35;
+}
+
+.focus-speaking-bars span {
+  width: 4px;
+  border-radius: 999px;
+  background: #64748b;
+}
+
+.focus-speaking-bars span:nth-child(1) {
+  height: 8px;
+}
+
+.focus-speaking-bars span:nth-child(2) {
+  height: 16px;
+}
+
+.focus-speaking-bars span:nth-child(3) {
+  height: 11px;
+}
+
+.focus-speaking-bars.active {
+  opacity: 1;
+}
+
+.focus-speaking-bars.active span {
+  background: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.42);
+}
+
+.focus-chat-title {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.room-page.game-focus-mode .chat-list {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 0;
+}
+
+.room-page.game-focus-mode .chat-bubble {
+  background: rgba(15, 23, 42, 0.58);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.room-page.game-focus-mode .chat-message.system .chat-bubble {
+  background: rgba(79, 70, 229, 0.16);
+}
+
+.room-page.game-focus-mode .chat-bubble p,
+.room-page.game-focus-mode .chat-bubble strong {
+  color: #e2e8f0;
+}
+
+.room-page.game-focus-mode .chat-bubble small {
+  color: #94a3b8;
+}
+
+.room-page.game-focus-mode .chat-input {
+  margin-top: 0;
+}
+
+.room-page.game-focus-mode .chat-input input {
+  color: #e2e8f0;
+  background: rgba(2, 6, 23, 0.58);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.room-page.game-focus-mode .chat-input input::placeholder {
+  color: #64748b;
 }
 
 /* =========================================================
@@ -3208,6 +4224,23 @@ function formatChatTime(timestamp) {
     font-size: 26px;
     letter-spacing: 0.26em;
   }
+
+  .game-player-controls {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .game-control-left,
+  .game-control-right {
+    justify-content: center;
+  }
+
+.fullscreen-hint {
+  display: none;
+}
 
   .bottom-tabs {
     grid-template-columns: 1fr;

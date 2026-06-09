@@ -125,3 +125,22 @@ v0.6 Update
 - Updated Home page navigation so Get Started routes to Create Account and Log in routes to Login
 - Optimized the Home top bar to better match the v0.6 auth visual system
 - Made the landing page navigation lighter, cleaner, and more consistent with VOXYN’s product identity
+
+v0.7 Update
+
+- Upgraded Stage 2 from a small game panel into a full app-level Game Focus Mode
+- Added a large dark game workspace for future multiplayer game runtime
+- Added a right-side Focus Panel for Voice Channels, Connected Users, and Chat
+- Kept voice, chat, and room messages available while staying inside Stage 2
+- Added Stage 2 enter and exit flow between Room Workspace and Game Focus Mode
+- Added bottom voice control bar inside Stage 2
+- Connected Stage 2 mic and listening controls with the existing WebRTC-style voice state
+- Preserved Voice Channels inside Stage 2 so users can switch channels without leaving the game screen
+- Improved the visual difference between Stage 1 Room Workspace and Stage 2 Game Focus Mode
+- Adjusted Stage 2 layout proportions so the game area feels wider and more focused
+- Improved connected user display inside the Focus Panel
+- Kept chat visible during Game Focus Mode for a more Discord-like room experience
+- Added placeholder VOXYN Game Focus Mode screen as the foundation for future real games
+- Prepared Stage 2 structure for future game selection, game runtime rendering, and multiplayer synchronization
+- Marked the previous v0.63 Stage 2 work as the beginning of VOXYN v0.7
+- Planned next step: replace the placeholder game screen with the real Start Game flow and first playable game mode
