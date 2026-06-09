@@ -144,3 +144,39 @@ v0.7 Update
 - Prepared Stage 2 structure for future game selection, game runtime rendering, and multiplayer synchronization
 - Marked the previous v0.63 Stage 2 work as the beginning of VOXYN v0.7
 - Planned next step: replace the placeholder game screen with the real Start Game flow and first playable game mode
+
+v0.71 Update
+- Started component-based VOXYN game system
+- Kept games inside Room experience conceptually
+- Prevented game code from being placed directly inside RoomView.vue
+- Added games component structure: GameLibrary.vue, GameCard.vue, GameStage.vue, TicTacToe.vue
+- Added Tic Tac Toe as the first playable game module
+- Added AI mode and local Multiplayer mode for Tic Tac Toe
+- Updated GameStage to switch between GameLibrary and selected game screen
+- Updated GameLibrary to use full desktop game grid on large screens
+- Added compact launcher list for half-screen / narrow screen layouts
+- Avoided squeezing full game cards into a thin vertical column
+- Added Stage 2 half-screen responsive guard
+- Hid / reduced Focus Panel behavior on narrow Stage 2 layout
+- Made Stage 2 game area use full available width in half-screen
+- Fixed Stage 2 internal scrolling issue by allowing Game Area scroll
+- Added scroll safety for GameStage and GameLibrary
+- Preserved Section Comment structure for future replacement edits
+
+v0.72:
+- Stage 2 layout is now acceptable and saved as the current checkpoint.
+- Wide-screen mode: Game Library stays on the left, Focus Panel stays on the right.
+- Half-screen / narrow mode: Focus Panel can stack below the Game Library.
+- Game code remains componentized outside RoomView.vue.
+- Current game components include GameStage, GameLibrary, GameCard, and TicTacToe.
+- Game Library now scrolls correctly.
+- Bottom voice controls no longer cover the game cards.
+- Bottom voice bar is now part of the game-area layout instead of floating over content.
+- Bottom controls include Deafen / Disable Sound, Mic, Leave Channel, Settings, voice status, Quality, and Back / Exit controls.
+- Focus Panel keeps Voice Channels, Connected Users, Chat, and message input.
+- Leave Channel has been polished into a VOXYN-style mini button using ↩.
+- Removed the browser default tooltip/title from the Leave Channel button.
+- Voice channel active states should respect hasJoinedVoice, so leaving voice no longer leaves a fake selected channel state.
+- Preserve the current dark / liquid-glass VOXYN style.
+- Preserve Section Comment structure.
+- Avoid large rewrites unless necessary.

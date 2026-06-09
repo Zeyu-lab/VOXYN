@@ -12,6 +12,7 @@ import { useRoute, useRouter } from "vue-router"
 import { supabase, socket } from "../lib/supabaseClient"
 import { useVoiceRoom } from "../webrtc/useVoiceRoom.js"
 console.log("VOXYN v0.52 RoomView build loaded")
+import GameStage from "../components/games/GameStage.vue"
 
 /* =========================================================
    SECTION 2: Router
@@ -1843,53 +1844,56 @@ function formatChatTime(timestamp) {
                 ▰ {{ gameLatencyLabel }}
               </div>
 
-              <div class="game-hero-content">
-                <div class="cube-mark">◆</div>
-
-                <p>VOXYN</p>
-                <h2>{{ gameStageTitle }}</h2>
-                <span>The game is ready.</span>
-                <small>{{ gameStageSubtitle }}</small>
-
-                <button
-                  type="button"
-                  @click="toggleGameFocusMode"
-                >
-                  {{ primaryGameButtonLabel }}
-                </button>
+              <!-- =====================================================
+                  SECTION 5B.1: Stage 2 Game Scroll Shell
+                  Purpose:
+                  - Keep GameStage outside RoomView logic
+                  - Prevent bottom voice controls from covering game cards
+              ====================================================== -->
+              <div class="stage-two-game-scroll-shell">
+                <GameStage
+                  :is-stage-two="isGameFocusMode"
+                  :room-code="roomCode"
+                  :room-title="roomTitle"
+                  :user="user"
+                  :socket="socket"
+                  @enter-stage-two="enterStageTwoGame"
+                />
               </div>
-
+              
               <div class="game-player-controls">
                 <div class="game-control-left">
                   <button
                     type="button"
-                    class="game-control-btn"
-                    :class="{ active: hasJoinedVoice && !isDeafened }"
+                    class="game-control-btn deafen-control-btn"
+                    :class="{ active: hasJoinedVoice && !isDeafened, deafened: hasJoinedVoice && isDeafened }"
                     :disabled="voiceJoinLoading || voiceLeaveLoading"
-                    :title="hasJoinedVoice && !isDeafened ? 'Listening' : 'Enable listening'"
+                    :title="hasJoinedVoice && isDeafened ? 'Enable sound' : 'Deafen / disable sound'"
                     @click="toggleGameScreenHeadphones"
                   >
                     {{ hasJoinedVoice && !isDeafened ? "🎧" : "🔇" }}
                   </button>
 
-                  <div
-                    class="game-control-slider"
-                    :class="{ 'is-muted': !hasJoinedVoice || isDeafened }"
-                  >
-                    <span
-                      :style="{ width: hasJoinedVoice && !isDeafened ? '58%' : '8%' }"
-                    ></span>
-                  </div>
-
                   <button
                     type="button"
-                    class="game-control-btn"
+                    class="game-control-btn mic-control-btn"
                     :class="{ active: hasJoinedVoice && isMicOn }"
                     :disabled="voiceJoinLoading || voiceLeaveLoading"
                     :title="hasJoinedVoice && isMicOn ? 'Mute microphone' : 'Enable microphone'"
                     @click="toggleGameScreenMicrophone"
                   >
                     {{ hasJoinedVoice && isMicOn ? "🎙" : "◌" }}
+                  </button>
+
+                  <button
+                    type="button"
+                    class="game-control-btn leave-channel-icon-btn"
+                    :class="{ active: hasJoinedVoice }"
+                    :disabled="!hasJoinedVoice || voiceJoinLoading || voiceLeaveLoading"
+                    :title="voiceLeaveLoading ? 'Leaving voice channel...' : 'Leave Channel'"
+                    @click="leaveVoiceChannel"
+                  >
+                    {{ voiceLeaveLoading ? "…" : "⏏" }}
                   </button>
 
                   <button
@@ -1959,12 +1963,27 @@ function formatChatTime(timestamp) {
                 <div class="focus-card-head">
                   <div>
                     <p class="focus-side-title">Voice Channels</p>
-                    <span>Switch channel without leaving Stage 2</span>
+                    <span>
+                      {{ hasJoinedVoice ? "Switch channel without leaving Stage 2" : "Join a voice channel to talk" }}
+                    </span>
                   </div>
 
-                  <strong class="focus-count-pill">
-                    {{ currentVoiceMembers.length }}
-                  </strong>
+                  <div class="focus-card-actions">
+                    <strong class="focus-count-pill">
+                      {{ currentVoiceMembers.length }}
+                    </strong>
+
+                    <button
+                      type="button"
+                      class="focus-leave-mini-btn"
+                      :class="{ active: hasJoinedVoice }"
+                      :disabled="!hasJoinedVoice || voiceJoinLoading || voiceLeaveLoading"
+                      aria-label="Leave voice channel"
+                      @click="leaveVoiceChannel"
+                    >
+                      {{ voiceLeaveLoading ? "…" : "↩" }}
+                    </button>
+                  </div>
                 </div>
 
                 <div class="focus-channel-list">
@@ -1973,11 +1992,11 @@ function formatChatTime(timestamp) {
                     :key="`focus-${channel.name}`"
                     type="button"
                     class="focus-channel-item"
-                    :class="{ active: selectedVoiceChannel === channel.name }"
+                    :class="{ active: hasJoinedVoice && selectedVoiceChannel === channel.name }"
                     @click="joinVoiceChannel(channel.name)"
                   >
                     <span>
-                      {{ selectedVoiceChannel === channel.name ? "◉" : "○" }}
+                      {{ hasJoinedVoice && selectedVoiceChannel === channel.name ? "◉" : "○" }}
                       {{ channel.name }}
                     </span>
 
@@ -4104,66 +4123,237 @@ function formatChatTime(timestamp) {
     max-height: 300px;
   }
 }
-
 /* =========================================================
-   SECTION 10.5: Tight Half Screen
+   SECTION 11.5: Stage 2 Half-Screen Stack Layout
    Purpose:
-   - Stack the room workspace before it starts squeezing
+   - Keep Game Screen on top
+   - Show Focus Panel below Game Screen
+   - Allow the whole Stage 2 page to scroll
+   - Preserve VOXYN dark glass style
 ========================================================= */
-@media (max-width: 980px) {
-  .room-main {
-    padding: 14px;
+@media (max-width: 1050px) {
+  .room-page.game-focus-mode .room-main {
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+
+    padding: 10px;
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .room-header {
-    min-height: auto;
-    padding: 18px;
-    align-items: flex-start;
-    gap: 14px;
-  }
-
-  .room-header h1 {
-    font-size: 24px;
-  }
-
-  .create-strip-control {
-    grid-template-columns: 1fr;
-  }
-
-  .workspace-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .workspace-sidebar {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .center-workspace {
-    grid-template-rows: auto minmax(320px, auto) 58px;
-  }
-
-  .member-bar {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  .member-avatars {
-    justify-content: flex-start;
-  }
-
-  .invite-btn {
+  .room-page.game-focus-mode .workspace-grid {
     width: 100%;
+    height: auto;
+    min-height: 0;
+
+    display: grid;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto;
+    gap: 14px;
+
+    overflow: visible;
   }
 
-  .chat-card {
-    min-height: 420px;
-    max-height: none;
+  .room-page.game-focus-mode .center-workspace {
+    grid-column: 1 / -1;
+
+    width: 100%;
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+
+    min-width: 0;
+    min-height: 0;
+
+    display: block;
+    overflow: hidden;
   }
 
-  .chat-list {
+  .room-page.game-focus-mode .game-area {
+    width: 100%;
+    max-width: none;
+
+    height: 100%;
+    min-height: 0;
+
+    padding: 74px 12px 92px;
+    border-radius: 22px;
+
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .room-page.game-focus-mode .game-area::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  .room-page.game-focus-mode .game-focus-frame {
+    width: 100%;
+    min-width: 0;
+    min-height: 100%;
+
+    padding-top: 0;
+
+    overflow: visible;
+    box-sizing: border-box;
+  }
+
+  /* Focus Panel appears under the Game Screen */
+  .room-page.game-focus-mode .chat-card {
+    grid-column: 1 / -1;
+
+    display: grid !important;
+
+    width: 100%;
+    min-width: 0;
+
+    height: auto;
+    min-height: calc(100vh - 20px);
+    min-height: calc(100dvh - 20px);
+
     max-height: none;
+
+    padding: 18px;
+    border-radius: 28px;
+
+    color: #e2e8f0;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(96, 165, 250, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.9));
+
+    border: 1px solid rgba(148, 163, 184, 0.28);
+
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 18px 44px rgba(2, 6, 23, 0.28);
+
+    backdrop-filter: blur(18px);
+
+    grid-template-rows: auto auto auto minmax(360px, 1fr) auto;
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-topbar {
+    top: 12px;
+    left: 12px;
+    right: 12px;
+
+    min-height: 46px;
+    padding: 8px 10px;
+
+    border-radius: 16px;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info {
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info strong {
+    max-width: 82px;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info span:nth-of-type(2) {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .exit-stage-btn {
+    min-height: 34px;
+    padding: 0 11px;
+
+    font-size: 11px;
+  }
+
+  .room-page.game-focus-mode .game-latency-pill,
+  .room-page.game-focus-mode .fullscreen-hint {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .game-player-controls {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+
+    min-height: 54px;
+    padding: 8px;
+
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    border-radius: 18px;
+  }
+
+  .room-page.game-focus-mode .game-control-left,
+  .room-page.game-focus-mode .game-control-right {
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .room-page.game-focus-mode .game-control-slider {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .game-player-controls button {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+  }
+
+  .room-page.game-focus-mode .game-voice-status {
+    max-width: 118px;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-page.game-focus-mode .quality-pill {
+    min-height: 38px;
+    padding: 0 10px;
   }
 }
+
+/* =========================================================
+   SECTION 11.6: Stage 2 Extremely Narrow Safety
+   Purpose:
+   - Extra protection for very narrow split-screen width
+========================================================= */
+@media (max-width: 560px) {
+  .room-page.game-focus-mode .game-area {
+    padding: 68px 10px 112px;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info span {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .game-player-controls {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr auto;
+  }
+
+  .room-page.game-focus-mode .game-voice-status {
+    max-width: 92px;
+  }
+
+  .room-page.game-focus-mode .quality-pill span {
+    display: none;
+  }
+}
+
 
 /* =========================================================
    SECTION 11: Phone Layout
@@ -4256,5 +4446,605 @@ function formatChatTime(timestamp) {
     height: 34px;
   }
 }
+/* =========================================================
+   SECTION 11.7: Stage 2 Medium-Screen True Stack Layout
+   Purpose:
+   - Fix 1050px–1350px Stage 2 layout
+   - Make Game Screen a real 3-row layout:
+     topbar / scrollable game content / voice controls
+   - Show Focus Panel below Game Screen
+   - Add Leave Channel button styling
+========================================================= */
+@media (max-width: 1350px) {
+  .room-page.game-focus-mode {
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
 
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .room-page.game-focus-mode .room-main {
+    width: 100vw;
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+
+    padding: 10px;
+    overflow: visible !important;
+
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .workspace-grid {
+    width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+
+    display: grid;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto;
+    gap: 16px;
+
+    overflow: visible !important;
+  }
+
+  .room-page.game-focus-mode .center-workspace {
+    grid-column: 1 / -1;
+
+    width: 100%;
+    height: auto !important;
+    min-height: 0;
+
+    display: block;
+    overflow: visible !important;
+  }
+
+  .room-page.game-focus-mode .game-area {
+    width: 100%;
+    height: 640px !important;
+    min-height: 560px;
+    max-height: 640px;
+
+    display: grid !important;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    place-items: stretch;
+
+    gap: 12px;
+    padding: 14px;
+
+    border-radius: 28px;
+    overflow: hidden !important;
+
+    text-align: left;
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-topbar {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+
+    z-index: 8;
+
+    width: 100%;
+    min-height: 48px;
+    padding: 8px 10px 8px 16px;
+
+    border-radius: 16px;
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-scroll-shell {
+    position: relative;
+    z-index: 2;
+
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+
+    padding: 0 4px 20px;
+
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(96, 165, 250, 0.34);
+  }
+
+  .room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-stage),
+  .room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library),
+  .room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library-shell) {
+    width: 100%;
+    max-width: 100%;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  .room-page.game-focus-mode .game-player-controls {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+
+    z-index: 8;
+
+    width: 100%;
+    min-height: 56px;
+    padding: 8px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+
+    border-radius: 18px;
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .game-control-left,
+  .room-page.game-focus-mode .game-control-right {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .room-page.game-focus-mode .game-control-slider {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .game-player-controls button {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+
+  .room-page.game-focus-mode .leave-channel-icon-btn {
+    color: #fecaca;
+    border-color: rgba(248, 113, 113, 0.34);
+    background: rgba(127, 29, 29, 0.22);
+  }
+
+  .room-page.game-focus-mode .leave-channel-icon-btn.active {
+    color: white;
+    border-color: rgba(248, 113, 113, 0.48);
+    background: rgba(220, 38, 38, 0.42);
+    box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.12);
+  }
+
+  .room-page.game-focus-mode .game-voice-status {
+    max-width: 178px;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-page.game-focus-mode .quality-pill {
+    min-height: 40px;
+    padding: 0 12px;
+  }
+
+  .room-page.game-focus-mode .game-latency-pill,
+  .room-page.game-focus-mode .fullscreen-hint {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info {
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info strong {
+    max-width: 120px;
+
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .room-page.game-focus-mode .stage-two-room-info span:nth-of-type(2) {
+    display: none;
+  }
+
+  .room-page.game-focus-mode .exit-stage-btn {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+
+  .room-page.game-focus-mode .chat-card {
+    grid-column: 1 / -1;
+
+    display: grid !important;
+
+    width: 100%;
+    min-width: 0;
+
+    height: auto !important;
+    min-height: 680px;
+    max-height: none !important;
+
+    padding: 18px;
+    border-radius: 28px;
+
+    color: #e2e8f0;
+    background:
+      radial-gradient(circle at 20% 0%, rgba(96, 165, 250, 0.12), transparent 34%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.9));
+
+    border: 1px solid rgba(148, 163, 184, 0.28);
+
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 18px 44px rgba(2, 6, 23, 0.28);
+
+    backdrop-filter: blur(18px);
+
+    grid-template-rows: auto auto auto minmax(360px, 1fr) auto;
+    box-sizing: border-box;
+  }
+
+  .room-page.game-focus-mode .focus-card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .room-page.game-focus-mode .focus-leave-channel-btn {
+    min-height: 42px;
+    padding: 0 14px;
+
+    border-radius: 14px;
+    border: 1px solid rgba(248, 113, 113, 0.32);
+
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.2);
+
+    font-size: 12px;
+    font-weight: 950;
+    cursor: pointer;
+  }
+
+  .room-page.game-focus-mode .focus-leave-channel-btn:hover:not(:disabled) {
+    color: white;
+    background: rgba(220, 38, 38, 0.42);
+  }
+
+  .room-page.game-focus-mode .focus-leave-channel-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+/* =========================================================
+   SECTION 11.8: VOXYN v0.71 Final Stage 2 Layout Fix
+   Purpose:
+   - Keep desktop Stage 2 as Game Library + Focus Panel
+   - Stop bottom voice bar from covering game cards
+   - Restore clear Deafen / Mic / Leave Channel controls
+   - Keep half-screen stack behavior only when screen is truly narrow
+========================================================= */
+
+/* Stage 2 game screen becomes a clean 3-row layout */
+.room-page.game-focus-mode .game-area {
+  width: 100%;
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 620px;
+
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+
+  padding: 14px;
+  overflow: hidden !important;
+
+  text-align: left;
+  box-sizing: border-box;
+}
+
+/* Topbar should not float over the game cards */
+.room-page.game-focus-mode .stage-two-game-topbar {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+
+  z-index: 10;
+
+  width: 100%;
+  min-height: 48px;
+
+  box-sizing: border-box;
+}
+
+/* This is the only scroll area inside the game screen */
+.room-page.game-focus-mode .stage-two-game-scroll-shell {
+  position: relative;
+  z-index: 2;
+
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+
+  padding: 0 4px 18px;
+
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar {
+  width: 6px;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.34);
+}
+
+/* Scoped style needs :deep because GameStage / GameLibrary are child components */
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-stage),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library-shell),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-grid),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-list) {
+  width: 100%;
+  max-width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+/* Bottom controls now take real layout space instead of covering cards */
+.room-page.game-focus-mode .game-player-controls {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+
+  z-index: 10;
+
+  width: 100%;
+  min-height: 56px;
+
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.room-page.game-focus-mode .game-control-left {
+  min-width: 0;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-page.game-focus-mode .game-control-right {
+  min-width: 0;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-page.game-focus-mode .game-control-slider {
+  display: none !important;
+}
+
+.room-page.game-focus-mode .game-player-controls button {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+}
+
+/* Deafen / disable sound button */
+.room-page.game-focus-mode .deafen-control-btn {
+  color: #dbeafe;
+  border-color: rgba(96, 165, 250, 0.36);
+  background: rgba(37, 99, 235, 0.34);
+}
+
+.room-page.game-focus-mode .deafen-control-btn.active {
+  color: white;
+  border-color: rgba(96, 165, 250, 0.62);
+  background: rgba(37, 99, 235, 0.86);
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.16);
+}
+
+.room-page.game-focus-mode .deafen-control-btn.deafened {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+/* Mic button */
+.room-page.game-focus-mode .mic-control-btn.active {
+  color: white;
+  border-color: rgba(96, 165, 250, 0.62);
+  background: rgba(37, 99, 235, 0.86);
+}
+
+/* Leave channel button */
+.room-page.game-focus-mode .leave-channel-icon-btn {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.34);
+  background: rgba(127, 29, 29, 0.22);
+}
+
+.room-page.game-focus-mode .leave-channel-icon-btn.active {
+  color: white;
+  border-color: rgba(248, 113, 113, 0.48);
+  background: rgba(220, 38, 38, 0.42);
+}
+
+.room-page.game-focus-mode .game-voice-status {
+  max-width: 190px;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Desktop / wide mode: keep Focus Panel on the right */
+.room-page.game-focus-mode .workspace-grid {
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: stretch;
+}
+
+.room-page.game-focus-mode .chat-card {
+  grid-column: auto;
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 620px;
+  max-height: none;
+}
+
+/* Medium screen: still keep right panel if there is enough width */
+@media (max-width: 1350px) and (min-width: 1051px) {
+  .room-page.game-focus-mode .workspace-grid {
+    grid-template-columns: minmax(0, 1fr) 310px !important;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .room-page.game-focus-mode .chat-card {
+    grid-column: auto !important;
+    height: calc(100vh - 20px);
+    height: calc(100dvh - 20px);
+    min-height: 560px;
+  }
+}
+
+/* Real half-screen: stack Focus Panel below */
+@media (max-width: 1050px) {
+  .room-page.game-focus-mode .room-main {
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .room-page.game-focus-mode .workspace-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto;
+    gap: 14px;
+
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .room-page.game-focus-mode .center-workspace {
+    height: auto !important;
+    min-height: 0;
+    overflow: visible !important;
+  }
+
+  .room-page.game-focus-mode .game-area {
+    height: 640px;
+    min-height: 560px;
+  }
+
+  .room-page.game-focus-mode .chat-card {
+    grid-column: 1 / -1 !important;
+
+    width: 100%;
+    height: auto !important;
+    min-height: 680px;
+  }
+
+  .room-page.game-focus-mode .game-voice-status {
+    max-width: 132px;
+  }
+
+  .room-page.game-focus-mode .quality-pill span {
+    display: none;
+  }
+}
+
+/* =========================================================
+   SECTION 11.9: VOXYN v0.71 Leave Button Mini Fix
+   Purpose:
+   - Replace ugly default Leave Channel tooltip/button
+   - Keep Focus Panel clean
+========================================================= */
+
+.room-page.game-focus-mode .focus-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-page.game-focus-mode .focus-leave-mini-btn {
+  width: 42px;
+  height: 42px;
+
+  display: inline-grid;
+  place-items: center;
+
+  border-radius: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.34);
+
+  color: #fecaca;
+  background:
+    linear-gradient(135deg, rgba(127, 29, 29, 0.34), rgba(15, 23, 42, 0.78));
+
+  font-size: 18px;
+  font-weight: 950;
+
+  cursor: pointer;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 22px rgba(127, 29, 29, 0.18);
+
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease,
+    opacity 0.16s ease;
+}
+
+.room-page.game-focus-mode .focus-leave-mini-btn.active:hover {
+  transform: translateY(-1px);
+  color: white;
+  border-color: rgba(248, 113, 113, 0.58);
+  background:
+    linear-gradient(135deg, rgba(220, 38, 38, 0.58), rgba(88, 28, 135, 0.36));
+}
+
+.room-page.game-focus-mode .focus-leave-mini-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+}
 </style>
