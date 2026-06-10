@@ -1,14 +1,16 @@
 /* =========================================================
-   SECTION 1: Imports
+   SECTION 1: Dependencies
    Purpose:
-   - Import backend dependencies
+   - Load Express / HTTP / Socket.IO dependencies
+   - Load environment variables
 ========================================================= */
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
-const { Server } = require("socket.io");
 const crypto = require("crypto");
-const path = require("path");
+const { Server } = require("socket.io");
+
 require("dotenv").config();
 
 /* =========================================================
@@ -132,10 +134,17 @@ function getOrCreateRoom(roomCode) {
     rooms.set(roomCode, {
       users: new Map(),
       messages: [],
+      gameSessions: new Map(),
     });
   }
 
-  return rooms.get(roomCode);
+  const room = rooms.get(roomCode);
+
+  if (!room.gameSessions) {
+    room.gameSessions = new Map();
+  }
+
+  return room;
 }
 
 function getRoomUsers(roomCode) {
@@ -174,6 +183,365 @@ function normalizeVoiceChannel(channel) {
   }
 
   return "Lobby";
+}
+
+/* =========================================================
+   SECTION 5.2: Game Session Helpers
+   Purpose:
+   - Manage VOXYN game sessions inside each room
+   - Support player slots and spectator mode
+   - Allow both multiplayer games and single-player watched games
+========================================================= */
+const GAME_CONFIGS = {
+  "tic-tac-toe": {
+    gameId: "tic-tac-toe",
+    title: "Tic Tac Toe",
+    maxPlayers: 2,
+    playerSlots: ["X", "O"],
+    allowSpectators: true,
+    mode: "turn-based",
+  },
+
+  "falling-blocks": {
+    gameId: "falling-blocks",
+    title: "Falling Blocks",
+    maxPlayers: 1,
+    playerSlots: ["P1"],
+    allowSpectators: true,
+    mode: "solo-live",
+  },
+};
+
+function getGameConfig(gameId) {
+  return GAME_CONFIGS[gameId] || null;
+}
+
+function createInitialGameState(gameId) {
+  if (gameId === "tic-tac-toe") {
+    return {
+      board: Array(9).fill(null),
+      currentTurn: "X",
+      winner: null,
+      status: "waiting",
+      round: 1,
+    };
+  }
+
+  if (gameId === "falling-blocks") {
+    return {
+      board: [],
+      activePiece: null,
+      nextPiece: null,
+      score: 0,
+      lines: 0,
+      level: 1,
+      elapsedSeconds: 0,
+      status: "idle",
+      difficulty: "standard",
+    };
+  }
+
+  return {
+    status: "idle",
+  };
+}
+
+function createPlayerSlots(config) {
+  return config.playerSlots.map((slotId) => {
+    return {
+      slotId,
+      socketId: null,
+      userId: "",
+      username: "",
+      avatarUrl: "",
+      initial: "",
+      joinedAt: null,
+    };
+  });
+}
+
+function getGameSocketRoom(roomCode, gameId) {
+  return `game:${roomCode}:${gameId}`;
+}
+
+function getSocketIdentity(socket) {
+  const username = String(socket.data.username || "Guest").trim();
+  const initial = String(socket.data.initial || username.charAt(0) || "U")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+
+  return {
+    socketId: socket.id,
+    userId: String(socket.data.userId || "").trim(),
+    username,
+    email: String(socket.data.email || "").trim(),
+    avatarUrl: String(socket.data.avatarUrl || "").trim(),
+    initial,
+  };
+}
+
+function getOrCreateGameSession(roomCode, gameId) {
+  const config = getGameConfig(gameId);
+
+  if (!config) {
+    return null;
+  }
+
+  const room = getOrCreateRoom(roomCode);
+
+  if (!room.gameSessions.has(gameId)) {
+    room.gameSessions.set(gameId, {
+      id: crypto.randomUUID(),
+      roomCode,
+      gameId,
+      title: config.title,
+      mode: config.mode,
+      maxPlayers: config.maxPlayers,
+      allowSpectators: config.allowSpectators,
+      playerSlots: createPlayerSlots(config),
+      spectators: new Map(),
+      gameState: createInitialGameState(gameId),
+      status: "waiting",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  return room.gameSessions.get(gameId);
+}
+
+function serializeParticipant(participant) {
+  if (!participant) return null;
+
+  return {
+    socketId: participant.socketId,
+    userId: participant.userId,
+    username: participant.username,
+    avatarUrl: participant.avatarUrl,
+    initial: participant.initial,
+    joinedAt: participant.joinedAt,
+  };
+}
+
+function serializeGameSession(session) {
+  if (!session) return null;
+
+  const occupiedPlayers = session.playerSlots.filter((slot) => slot.socketId);
+
+  return {
+    id: session.id,
+    roomCode: session.roomCode,
+    gameId: session.gameId,
+    title: session.title,
+    mode: session.mode,
+    maxPlayers: session.maxPlayers,
+    playerCount: occupiedPlayers.length,
+    spectatorCount: session.spectators.size,
+    status: session.status,
+    playerSlots: session.playerSlots.map((slot) => {
+      return {
+        slotId: slot.slotId,
+        occupied: Boolean(slot.socketId),
+        player: slot.socketId ? serializeParticipant(slot) : null,
+      };
+    }),
+    spectators: Array.from(session.spectators.values()).map(serializeParticipant),
+    gameState: session.gameState,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  };
+}
+
+function getSocketRoleInGameSession(session, socketId) {
+  const playerSlot = session.playerSlots.find((slot) => {
+    return slot.socketId === socketId;
+  });
+
+  if (playerSlot) {
+    return {
+      role: "player",
+      slotId: playerSlot.slotId,
+    };
+  }
+
+  if (session.spectators.has(socketId)) {
+    return {
+      role: "spectator",
+      slotId: null,
+    };
+  }
+
+  return {
+    role: "none",
+    slotId: null,
+  };
+}
+
+function removeSocketFromGameSession(session, socketId) {
+  let changed = false;
+
+  session.playerSlots.forEach((slot) => {
+    if (slot.socketId === socketId) {
+      slot.socketId = null;
+      slot.userId = "";
+      slot.username = "";
+      slot.avatarUrl = "";
+      slot.initial = "";
+      slot.joinedAt = null;
+      changed = true;
+    }
+  });
+
+  if (session.spectators.delete(socketId)) {
+    changed = true;
+  }
+
+  if (changed) {
+    const playerCount = session.playerSlots.filter((slot) => slot.socketId).length;
+
+    session.status =
+      playerCount >= session.maxPlayers
+        ? "playing"
+        : "waiting";
+
+    session.updatedAt = Date.now();
+  }
+
+  return changed;
+}
+
+function assignSocketToPlayerSlot(session, socket, preferredSlotId = "") {
+  const currentRole = getSocketRoleInGameSession(session, socket.id);
+
+  if (currentRole.role === "player") {
+    return {
+      ok: true,
+      role: "player",
+      slotId: currentRole.slotId,
+    };
+  }
+
+  const targetSlot =
+    session.playerSlots.find((slot) => {
+      return preferredSlotId && slot.slotId === preferredSlotId && !slot.socketId;
+    }) ||
+    session.playerSlots.find((slot) => {
+      return !slot.socketId;
+    });
+
+  if (!targetSlot) {
+    return {
+      ok: false,
+      error: "No player slot available.",
+    };
+  }
+
+  session.spectators.delete(socket.id);
+
+  const identity = getSocketIdentity(socket);
+
+  targetSlot.socketId = identity.socketId;
+  targetSlot.userId = identity.userId;
+  targetSlot.username = identity.username;
+  targetSlot.avatarUrl = identity.avatarUrl;
+  targetSlot.initial = identity.initial;
+  targetSlot.joinedAt = Date.now();
+
+  const playerCount = session.playerSlots.filter((slot) => slot.socketId).length;
+
+  session.status =
+    playerCount >= session.maxPlayers
+      ? "playing"
+      : "waiting";
+
+  session.updatedAt = Date.now();
+
+  return {
+    ok: true,
+    role: "player",
+    slotId: targetSlot.slotId,
+  };
+}
+
+function assignSocketToSpectator(session, socket) {
+  removeSocketFromGameSession(session, socket.id);
+
+  const identity = getSocketIdentity(socket);
+
+  session.spectators.set(socket.id, {
+    ...identity,
+    joinedAt: Date.now(),
+  });
+
+  session.updatedAt = Date.now();
+
+  return {
+    ok: true,
+    role: "spectator",
+    slotId: null,
+  };
+}
+
+function safeGameState(gameState) {
+  try {
+    const serialized = JSON.stringify(gameState || {});
+
+    if (serialized.length > 30000) {
+      return null;
+    }
+
+    return JSON.parse(serialized);
+  } catch (error) {
+    return null;
+  }
+}
+
+function emitGameSessionUpdate(roomCode, gameId) {
+  const room = rooms.get(roomCode);
+
+  if (!room?.gameSessions?.has(gameId)) {
+    return;
+  }
+
+  const session = room.gameSessions.get(gameId);
+  const gameRoom = getGameSocketRoom(roomCode, gameId);
+
+  io.to(gameRoom).emit("game:session-update", serializeGameSession(session));
+}
+
+function removeSocketFromAllGameSessions(roomCode, socketId) {
+  const room = rooms.get(roomCode);
+
+  if (!room?.gameSessions) {
+    return;
+  }
+
+  for (const [gameId, session] of room.gameSessions.entries()) {
+    const changed = removeSocketFromGameSession(session, socketId);
+
+    if (!changed) continue;
+
+    const hasPlayers = session.playerSlots.some((slot) => slot.socketId);
+    const hasSpectators = session.spectators.size > 0;
+
+    if (!hasPlayers && !hasSpectators) {
+      room.gameSessions.delete(gameId);
+      continue;
+    }
+
+    emitGameSessionUpdate(roomCode, gameId);
+  }
+}
+
+function getRoomGameSessions(roomCode) {
+  const room = rooms.get(roomCode);
+
+  if (!room?.gameSessions) {
+    return [];
+  }
+
+  return Array.from(room.gameSessions.values()).map(serializeGameSession);
 }
 
 /* =========================================================
@@ -249,6 +617,7 @@ io.on("connection", (socket) => {
       });
 
       socket.emit("room:history", room.messages);
+      socket.emit("game:sessions", getRoomGameSessions(roomCode));
 
       io.to(roomCode).emit("room:users", getRoomUsers(roomCode));
 
@@ -612,6 +981,476 @@ io.on("connection", (socket) => {
         }
       }
     });
+      /* =====================================================
+        SECTION 6.1.7: Game Session Events
+        Purpose:
+        - Create / join game sessions
+        - Manage player slots and spectators
+        - Sync live game state for spectator mode
+      ===================================================== */
+      socket.on("game:join-session", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || "").trim();
+          const preferRole = String(payload?.role || payload?.preferRole || "player")
+            .trim()
+            .toLowerCase();
+
+          if (!roomCode) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Room code is missing.",
+              });
+            }
+
+            return;
+          }
+
+          if (!getGameConfig(gameId)) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Invalid game id.",
+              });
+            }
+
+            return;
+          }
+
+          const room = rooms.get(roomCode);
+
+          if (!room?.users?.has(socket.id)) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Join the room before joining a game session.",
+              });
+            }
+
+            return;
+          }
+
+          const session = getOrCreateGameSession(roomCode, gameId);
+          const gameRoom = getGameSocketRoom(roomCode, gameId);
+
+          socket.join(gameRoom);
+          socket.data.activeGameId = gameId;
+
+          let joinResult;
+
+          if (preferRole === "spectator") {
+            joinResult = assignSocketToSpectator(session, socket);
+          } else {
+            joinResult = assignSocketToPlayerSlot(session, socket);
+
+            if (!joinResult.ok && session.allowSpectators) {
+              joinResult = assignSocketToSpectator(session, socket);
+            }
+          }
+
+          emitGameSessionUpdate(roomCode, gameId);
+
+          if (callback) {
+            callback({
+              ok: true,
+              role: joinResult.role,
+              slotId: joinResult.slotId,
+              session: serializeGameSession(session),
+            });
+          }
+        } catch (error) {
+          console.error("game:join-session error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to join game session.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:join-as-player", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const preferredSlotId = String(payload?.slotId || "").trim();
+
+          const session = getOrCreateGameSession(roomCode, gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Game session not found.",
+              });
+            }
+
+            return;
+          }
+
+          const result = assignSocketToPlayerSlot(session, socket, preferredSlotId);
+
+          if (!result.ok) {
+            if (callback) {
+              callback(result);
+            }
+
+            return;
+          }
+
+          socket.join(getGameSocketRoom(roomCode, gameId));
+          socket.data.activeGameId = gameId;
+
+          emitGameSessionUpdate(roomCode, gameId);
+
+          if (callback) {
+            callback({
+              ok: true,
+              role: result.role,
+              slotId: result.slotId,
+              session: serializeGameSession(session),
+            });
+          }
+        } catch (error) {
+          console.error("game:join-as-player error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to join as player.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:join-as-spectator", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+
+          const session = getOrCreateGameSession(roomCode, gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Game session not found.",
+              });
+            }
+
+            return;
+          }
+
+          const result = assignSocketToSpectator(session, socket);
+
+          socket.join(getGameSocketRoom(roomCode, gameId));
+          socket.data.activeGameId = gameId;
+
+          emitGameSessionUpdate(roomCode, gameId);
+
+          if (callback) {
+            callback({
+              ok: true,
+              role: result.role,
+              slotId: result.slotId,
+              session: serializeGameSession(session),
+            });
+          }
+        } catch (error) {
+          console.error("game:join-as-spectator error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to join as spectator.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:leave-session", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const room = rooms.get(roomCode);
+          const session = room?.gameSessions?.get(gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: true,
+              });
+            }
+
+            return;
+          }
+
+          removeSocketFromGameSession(session, socket.id);
+
+          socket.leave(getGameSocketRoom(roomCode, gameId));
+          socket.data.activeGameId = null;
+
+          const hasPlayers = session.playerSlots.some((slot) => slot.socketId);
+          const hasSpectators = session.spectators.size > 0;
+
+          if (!hasPlayers && !hasSpectators) {
+            room.gameSessions.delete(gameId);
+          } else {
+            emitGameSessionUpdate(roomCode, gameId);
+          }
+
+          if (callback) {
+            callback({
+              ok: true,
+            });
+          }
+        } catch (error) {
+          console.error("game:leave-session error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to leave game session.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:get-session", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const room = rooms.get(roomCode);
+          const session = room?.gameSessions?.get(gameId) || null;
+
+          if (callback) {
+            callback({
+              ok: true,
+              session: serializeGameSession(session),
+            });
+          }
+        } catch (error) {
+          console.error("game:get-session error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to get game session.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:state-sync", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const room = rooms.get(roomCode);
+          const session = room?.gameSessions?.get(gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Game session not found.",
+              });
+            }
+
+            return;
+          }
+
+          const role = getSocketRoleInGameSession(session, socket.id);
+
+          if (role.role !== "player") {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Only players can sync game state.",
+              });
+            }
+
+            return;
+          }
+
+          const nextGameState = safeGameState(payload?.gameState);
+
+          if (!nextGameState) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Invalid or oversized game state.",
+              });
+            }
+
+            return;
+          }
+
+          session.gameState = nextGameState;
+          session.updatedAt = Date.now();
+
+          io.to(getGameSocketRoom(roomCode, gameId)).emit("game:state-update", {
+            gameId,
+            gameState: session.gameState,
+            session: serializeGameSession(session),
+          });
+
+          if (callback) {
+            callback({
+              ok: true,
+            });
+          }
+        } catch (error) {
+          console.error("game:state-sync error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to sync game state.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:move", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const room = rooms.get(roomCode);
+          const session = room?.gameSessions?.get(gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Game session not found.",
+              });
+            }
+
+            return;
+          }
+
+          const role = getSocketRoleInGameSession(session, socket.id);
+
+          if (role.role !== "player") {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Spectators cannot make moves.",
+              });
+            }
+
+            return;
+          }
+
+          io.to(getGameSocketRoom(roomCode, gameId)).emit("game:move", {
+            gameId,
+            fromSocketId: socket.id,
+            slotId: role.slotId,
+            action: payload?.action || null,
+            createdAt: Date.now(),
+          });
+
+          if (callback) {
+            callback({
+              ok: true,
+            });
+          }
+        } catch (error) {
+          console.error("game:move error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to send game move.",
+            });
+          }
+        }
+      });
+
+      socket.on("game:reset", (payload, callback) => {
+        try {
+          const roomCode = String(
+            payload?.roomCode || socket.data.roomCode || ""
+          ).trim();
+
+          const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
+          const room = rooms.get(roomCode);
+          const session = room?.gameSessions?.get(gameId);
+
+          if (!session) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Game session not found.",
+              });
+            }
+
+            return;
+          }
+
+          const role = getSocketRoleInGameSession(session, socket.id);
+
+          if (role.role !== "player") {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Only players can reset the game.",
+              });
+            }
+
+            return;
+          }
+
+          session.gameState = createInitialGameState(gameId);
+          session.updatedAt = Date.now();
+
+          io.to(getGameSocketRoom(roomCode, gameId)).emit("game:state-update", {
+            gameId,
+            gameState: session.gameState,
+            session: serializeGameSession(session),
+          });
+
+          if (callback) {
+            callback({
+              ok: true,
+              session: serializeGameSession(session),
+            });
+          }
+        } catch (error) {
+          console.error("game:reset error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to reset game.",
+            });
+          }
+        }
+      });
+
 
   /* =====================================================
     SECTION 6.2: Send Chat Message
@@ -722,6 +1561,7 @@ io.on("connection", (socket) => {
     }
 
     const room = rooms.get(roomCode);
+    removeSocketFromAllGameSessions(roomCode, socket.id);
 
     if (room) {
       room.users.delete(socket.id);
@@ -771,7 +1611,8 @@ io.on("connection", (socket) => {
     }
 
     const room = rooms.get(roomCode);
-
+    
+    removeSocketFromAllGameSessions(roomCode, socket.id);
     if (room) {
       room.users.delete(socket.id);
     }

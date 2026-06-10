@@ -5,8 +5,8 @@
    - Load Vue helpers
    - Keep Falling Blocks as a standalone VOXYN game module
 ========================================================= */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue"
-
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { useGameSession } from "./useGameSession"
 /* =========================================================
    SECTION 2: Props / Emits
    Purpose:
@@ -33,6 +33,19 @@ const props = defineProps({
 })
 
 const emit = defineEmits(["back-to-library"])
+/* =========================================================
+   SECTION 2.1: Backend Game Session
+   Purpose:
+   - Join Falling Blocks as player if slot is open
+   - Join as spectator when player slot is full
+   - Allow spectators to watch live game state
+========================================================= */
+const gameSession = useGameSession({
+  socket: () => props.socket,
+  roomCode: () => props.roomCode,
+  gameId: "falling-blocks",
+  defaultRole: "player"
+})
 
 /* =========================================================
    SECTION 3: Board Constants
@@ -221,6 +234,17 @@ const displayBoard = computed(() => {
 const nextPiecePreview = computed(() => {
   return createPreviewGrid(nextPiece.value)
 })
+
+const canControlGame = computed(() => {
+  return gameSession.isPlayer.value
+})
+
+const sessionLabel = computed(() => {
+  if (gameSession.isPlayer.value) return "Player"
+  if (gameSession.isSpectator.value) return "Spectator"
+  return "Connecting"
+})
+
 
 /* =========================================================
    SECTION 8: Board / Piece Helpers
@@ -453,11 +477,15 @@ function scheduleNextDrop() {
    - Start, pause, restart, and end game
 ========================================================= */
 function selectDifficulty(difficultyId) {
+  if (!canControlGame.value) return
   if (!canChangeDifficulty.value) return
+
   selectedDifficulty.value = difficultyId
+  syncFallingBlocksState()
 }
 
 function startGame() {
+  if (!canControlGame.value) return
   if (gameStatus.value === "playing") return
 
   resetGameState()
@@ -468,23 +496,30 @@ function startGame() {
 
   startSecondTimer()
   scheduleNextDrop()
+  syncFallingBlocksState()
 }
 
 function pauseGame() {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
 
   gameStatus.value = "paused"
   clearDropTimer()
+  syncFallingBlocksState()
 }
 
 function resumeGame() {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "paused") return
 
   gameStatus.value = "playing"
   scheduleNextDrop()
+  syncFallingBlocksState()
 }
 
 function togglePauseGame() {
+  if (!canControlGame.value) return
+
   if (gameStatus.value === "playing") {
     pauseGame()
     return
@@ -496,6 +531,8 @@ function togglePauseGame() {
 }
 
 function restartGame() {
+  if (!canControlGame.value) return
+
   resetGameState()
   startGame()
 }
@@ -519,6 +556,7 @@ function endGame() {
   gameStatus.value = "game-over"
   clearDropTimer()
   clearSecondTimer()
+  syncFallingBlocksState()
 }
 
 /* =========================================================
@@ -529,6 +567,7 @@ function endGame() {
    - Soft drop / hard drop
 ========================================================= */
 function movePieceHorizontal(direction) {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
   if (!activePiece.value) return
 
@@ -540,6 +579,7 @@ function movePieceHorizontal(direction) {
   if (hasCollision(movedPiece)) return
 
   activePiece.value = movedPiece
+  syncFallingBlocksState()
 }
 
 function movePieceDown(addScore = true) {
@@ -683,6 +723,48 @@ function handleKeyDown(event) {
   }
 }
 
+
+/* =========================================================
+   SECTION 13.5: Backend State Sync
+   Purpose:
+   - Player sends live Falling Blocks state to backend
+   - Spectators receive and render read-only state
+========================================================= */
+function getFallingBlocksState() {
+  return {
+    board: board.value,
+    activePiece: activePiece.value,
+    nextPiece: nextPiece.value,
+    score: score.value,
+    lines: lines.value,
+    level: level.value,
+    elapsedSeconds: elapsedSeconds.value,
+    status: gameStatus.value,
+    difficulty: selectedDifficulty.value
+  }
+}
+
+function applyFallingBlocksState(nextState) {
+  if (!nextState) return
+  if (gameSession.isPlayer.value) return
+
+  board.value = nextState.board || createEmptyBoard()
+  activePiece.value = nextState.activePiece || null
+  nextPiece.value = nextState.nextPiece || createRandomPiece()
+  score.value = Number(nextState.score || 0)
+  lines.value = Number(nextState.lines || 0)
+  level.value = Number(nextState.level || 1)
+  elapsedSeconds.value = Number(nextState.elapsedSeconds || 0)
+  gameStatus.value = nextState.status || "idle"
+  selectedDifficulty.value = nextState.difficulty || "standard"
+}
+
+function syncFallingBlocksState() {
+  if (!gameSession.isPlayer.value) return
+
+  gameSession.syncGameState(getFallingBlocksState())
+}
+
 /* =========================================================
    SECTION 14: Display Helpers
 ========================================================= */
@@ -714,15 +796,40 @@ onBeforeUnmount(() => {
   clearSecondTimer()
   window.removeEventListener("keydown", handleKeyDown)
 })
-</script>
 
+watch(
+  () => gameSession.lastGameState.value,
+  (nextState) => {
+    applyFallingBlocksState(nextState)
+  }
+)
+
+watch(
+  () => [
+    board.value,
+    activePiece.value,
+    nextPiece.value,
+    score.value,
+    lines.value,
+    level.value,
+    elapsedSeconds.value,
+    gameStatus.value,
+    selectedDifficulty.value
+  ],
+  () => {
+    syncFallingBlocksState()
+  },
+  { deep: true }
+)
+
+</script>
 <template>
   <section class="falling-blocks-screen">
     <!-- =====================================================
         SECTION 1: Top Action Bar
         Purpose:
         - Return to Game Library
-        - Show current game name
+        - Show current game session status
     ====================================================== -->
     <div class="falling-topbar">
       <button
@@ -735,7 +842,11 @@ onBeforeUnmount(() => {
 
       <div class="topbar-status">
         <span>{{ props.roomCode || "VOXYN" }}</span>
-        <strong>{{ statusLabel }}</strong>
+        <strong>
+          {{ sessionLabel }} ·
+          {{ gameSession.playerCount.value }}/{{ gameSession.maxPlayers.value }}
+          · 👁 {{ gameSession.spectatorCount.value }}
+        </strong>
       </div>
     </div>
 
@@ -749,6 +860,11 @@ onBeforeUnmount(() => {
     <div class="falling-layout">
       <!-- ===================================================
           SECTION 2.1: Left Control Panel
+          Purpose:
+          - Game title
+          - Live session role
+          - Difficulty
+          - Controls
       ==================================================== -->
       <aside class="falling-panel left-panel">
         <div class="game-title-card">
@@ -760,6 +876,55 @@ onBeforeUnmount(() => {
             <span>{{ props.mode || "Single Player" }}</span>
             <small>Stack smart. Clear lines. Beat your high score.</small>
           </div>
+        </div>
+
+        <div class="panel-card live-session-card">
+          <div class="panel-heading">
+            <h3>Live Session</h3>
+            <span>{{ sessionLabel }}</span>
+          </div>
+
+          <div class="stat-row compact">
+            <span>Players</span>
+            <strong>
+              {{ gameSession.playerCount.value }}/{{ gameSession.maxPlayers.value }}
+            </strong>
+          </div>
+
+          <div class="stat-row compact">
+            <span>Spectators</span>
+            <strong>{{ gameSession.spectatorCount.value }}</strong>
+          </div>
+
+          <button
+            v-if="gameSession.isSpectator.value && gameSession.hasOpenPlayerSlot.value"
+            type="button"
+            class="start-btn"
+            @click="gameSession.joinAsPlayer()"
+          >
+            Take Player Slot
+          </button>
+
+          <p
+            v-if="gameSession.isSpectator.value"
+            class="difficulty-note"
+          >
+            You are watching this solo run. Controls are locked.
+          </p>
+
+          <p
+            v-else-if="gameSession.isPlayer.value"
+            class="difficulty-note"
+          >
+            You are controlling this run. Spectators can watch live.
+          </p>
+
+          <p
+            v-else
+            class="difficulty-note"
+          >
+            Connecting to live game session...
+          </p>
         </div>
 
         <div class="panel-card">
@@ -775,7 +940,7 @@ onBeforeUnmount(() => {
               type="button"
               class="difficulty-btn"
               :class="{ active: selectedDifficulty === option.id }"
-              :disabled="!canChangeDifficulty"
+              :disabled="!canControlGame || !canChangeDifficulty"
               @click="selectDifficulty(option.id)"
             >
               <strong>{{ option.label }}</strong>
@@ -828,6 +993,7 @@ onBeforeUnmount(() => {
             v-if="gameStatus === 'idle' || gameStatus === 'game-over'"
             type="button"
             class="start-btn"
+            :disabled="!canControlGame"
             @click="startGame"
           >
             ▶ Start Game
@@ -837,6 +1003,7 @@ onBeforeUnmount(() => {
             v-else-if="gameStatus === 'paused'"
             type="button"
             class="start-btn"
+            :disabled="!canControlGame"
             @click="resumeGame"
           >
             ▶ Resume
@@ -846,6 +1013,7 @@ onBeforeUnmount(() => {
             v-else
             type="button"
             class="pause-btn"
+            :disabled="!canControlGame"
             @click="pauseGame"
           >
             ❚❚ Pause
@@ -855,6 +1023,8 @@ onBeforeUnmount(() => {
 
       <!-- ===================================================
           SECTION 2.2: Center Board
+          Purpose:
+          - Main 10 x 15 game board
       ==================================================== -->
       <main class="board-zone">
         <div class="board-header">
@@ -888,7 +1058,8 @@ onBeforeUnmount(() => {
             class="board-overlay"
           >
             <strong>Ready?</strong>
-            <span>Choose difficulty and start.</span>
+            <span v-if="canControlGame">Choose difficulty and start.</span>
+            <span v-else>Waiting for the player to start.</span>
           </div>
 
           <div
@@ -896,7 +1067,8 @@ onBeforeUnmount(() => {
             class="board-overlay"
           >
             <strong>Paused</strong>
-            <span>Press P or Resume.</span>
+            <span v-if="canControlGame">Press P or Resume.</span>
+            <span v-else>The player paused this run.</span>
           </div>
 
           <div
@@ -906,11 +1078,22 @@ onBeforeUnmount(() => {
             <strong>Game Over</strong>
             <span>Time survived: {{ formattedTime }}</span>
           </div>
+
+          <div
+            v-if="gameSession.isSpectator.value && gameStatus === 'playing'"
+            class="spectator-badge"
+          >
+            👁 Watching Live
+          </div>
         </div>
       </main>
 
       <!-- ===================================================
           SECTION 2.3: Right Status Panel
+          Purpose:
+          - Next piece
+          - Score / lines / level / timer
+          - Restart / back actions
       ==================================================== -->
       <aside class="falling-panel right-panel">
         <div class="panel-card next-card">
@@ -937,10 +1120,11 @@ onBeforeUnmount(() => {
         <div class="panel-card stats-card">
           <div class="panel-heading">
             <h3>Game Status</h3>
+
             <button
               type="button"
               class="mini-pause-btn"
-              :disabled="gameStatus === 'idle' || gameStatus === 'game-over'"
+              :disabled="!canControlGame || gameStatus === 'idle' || gameStatus === 'game-over'"
               @click="togglePauseGame"
             >
               {{ isPaused ? "▶" : "❚❚" }}
@@ -978,6 +1162,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="restart-btn"
+            :disabled="!canControlGame"
             @click="restartGame"
           >
             ↻ Restart Game
@@ -1353,7 +1538,7 @@ kbd {
     linear-gradient(rgba(96, 165, 250, 0.09) 1px, transparent 1px),
     linear-gradient(90deg, rgba(96, 165, 250, 0.09) 1px, transparent 1px),
     rgba(15, 23, 42, 0.76);
-  background-size: 10% 5%, 10% 5%, auto;
+  background-size: 10% 6.666%, 10% 6.666%, auto;
 }
 
 .board-cell,
@@ -1555,4 +1740,28 @@ kbd {
     width: min(100%, 360px);
   }
 }
+
+.spectator-badge {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  z-index: 4;
+
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.42);
+
+  color: #bfdbfe;
+  background: rgba(15, 23, 42, 0.72);
+
+  font-size: 12px;
+  font-weight: 950;
+
+  backdrop-filter: blur(10px);
+}
+
 </style>

@@ -197,3 +197,14 @@ v0.73
 - Added Start / Pause / Restart controls
 - Integrated through FallingBlocks.vue, GameStage.vue, and GameLibrary.vue
 
+V0.75
+- Started backend game-session system
+- Added unified player / spectator session model
+- Added backend game configs for Tic Tac Toe and Falling Blocks
+- Added socket events for joining, leaving, syncing, and resetting game sessions
+- Connected Falling Blocks to live spectator mode
+- Added player-authoritative state sync for Falling Blocks
+- Added 10 × 15 Falling Blocks board support
+- Added player count, spectator count, and Take Player Slot behavior
+- Locked game controls for spectators
+- Prepared Tic Tac Toe for true multiplayer sessions in the next version
