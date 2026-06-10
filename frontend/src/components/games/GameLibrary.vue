@@ -15,11 +15,15 @@ import GameCard from "./GameCard.vue"
 const emit = defineEmits(["launch-game"])
 
 /* =========================================================
-   SECTION 3: Game Data
+   SECTION 3: Game Catalog
    Purpose:
-   - Define available VOXYN games
-   - First real playable game is Tic Tac Toe
-   - Other games are preview placeholders for now
+   - Central registry for all VOXYN game cards
+   - Add / remove / edit games here only
+   - Future games should be added as new objects below
+   Notes:
+   - id must match GameStage game component registry
+   - ready = true means playable now
+   - ready = false means preview / coming soon
 ========================================================= */
 const games = [
   {
@@ -33,13 +37,13 @@ const games = [
     ready: true
   },
   {
-    id: "game-2",
+    id: "falling-blocks",
     number: "Game 2",
-    title: "Game 2",
-    subtitle: "Think ahead. Beat the grid.",
+    title: "Falling Blocks",
+    subtitle: "Stack smart. Clear lines. Beat your high score.",
     cover: "grid",
     players: "1 player",
-    modes: ["AI"],
+    modes: ["Single Player"],
     ready: false
   },
   {
@@ -105,11 +109,24 @@ const games = [
 ]
 
 /* =========================================================
-   SECTION 4: Actions
+   SECTION 4: Launch Helpers
    Purpose:
-   - Receive launch event from GameCard
-   - Forward selected game data to GameStage
+   - Normalize launch payload format
+   - Keep desktop cards and compact list using same payload shape
 ========================================================= */
+function createLaunchPayload(game, mode) {
+  return {
+    gameId: game.id,
+    gameTitle: game.title,
+    mode,
+    modeLabel: mode
+  }
+}
+
+function launchGame(game, mode) {
+  emit("launch-game", createLaunchPayload(game, mode))
+}
+
 function launchGameFromCard(payload) {
   emit("launch-game", payload)
 }

@@ -7,7 +7,7 @@
    - Load Supabase client
    - Load Socket.IO client
 ========================================================= */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase, socket } from "../lib/supabaseClient"
 import { useVoiceRoom } from "../webrtc/useVoiceRoom.js"
@@ -290,6 +290,7 @@ const chatMessages = ref([
    - Game Screen controls use real WebRTC voice state
 ========================================================= */
 const roomStage = ref("workspace")
+const roomPageRef = ref(null)
 const gameFrameRef = ref(null)
 const isStageOneGameFullscreen = ref(false)
 
@@ -339,21 +340,78 @@ const gameVoiceStatusLabel = computed(() => {
    - Toggle Stage 1 / Stage 2 without destroying voice state
    - Bind Game Screen mic and headphone buttons to real WebRTC
 ========================================================= */
+function getRoomFullscreenElement() {
+  return (
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    null
+  )
+}
+
+async function requestRoomPageFullscreen() {
+  const target = roomPageRef.value
+
+  if (!target) return
+
+  if (target.requestFullscreen) {
+    await target.requestFullscreen()
+  } else if (target.webkitRequestFullscreen) {
+    await target.webkitRequestFullscreen()
+  }
+
+  isStageOneGameFullscreen.value = true
+}
+
+async function exitRoomPageFullscreen() {
+  const fullscreenElement = getRoomFullscreenElement()
+
+  if (!fullscreenElement) {
+    isStageOneGameFullscreen.value = false
+    return
+  }
+
+  if (document.exitFullscreen) {
+    await document.exitFullscreen()
+  } else if (document.webkitExitFullscreen) {
+    await document.webkitExitFullscreen()
+  }
+
+  isStageOneGameFullscreen.value = false
+}
+
+async function toggleRoomPageFullscreen() {
+  try {
+    if (getRoomFullscreenElement()) {
+      await exitRoomPageFullscreen()
+      return
+    }
+
+    await requestRoomPageFullscreen()
+  } catch (error) {
+    console.warn("VOXYN fullscreen failed:", error)
+    isStageOneGameFullscreen.value = Boolean(getRoomFullscreenElement())
+  }
+}
+
 function enterStageTwoGame() {
   roomStage.value = "game-focus"
   selectedTab.value = "Game"
   successMessage.value = ""
 }
 
-function exitStageTwoGame() {
+async function exitStageTwoGame() {
+  if (getRoomFullscreenElement()) {
+    await exitRoomPageFullscreen()
+  }
+
   roomStage.value = "workspace"
   selectedTab.value = "Game"
   successMessage.value = ""
 }
 
-function toggleGameFocusMode() {
+async function toggleGameFocusMode() {
   if (isGameFocusMode.value) {
-    exitStageTwoGame()
+    await exitStageTwoGame()
     return
   }
 
@@ -361,22 +419,29 @@ function toggleGameFocusMode() {
 }
 
 async function toggleStageOneGameFullscreen() {
-  toggleGameFocusMode()
+  if (!isGameFocusMode.value) {
+    enterStageTwoGame()
+    await nextTick()
+  }
+
+  await toggleRoomPageFullscreen()
 }
 
 function updateStageOneFullscreenState() {
-  isStageOneGameFullscreen.value = false
+  const fullscreenElement = getRoomFullscreenElement()
+
+  isStageOneGameFullscreen.value =
+    fullscreenElement === roomPageRef.value
 }
 
-function handleStageOneFullscreenShortcut(event) {
+async function handleStageOneFullscreenShortcut(event) {
   const activeTag = document.activeElement?.tagName?.toLowerCase()
 
   if (activeTag === "input" || activeTag === "textarea") return
   if (event.key?.toLowerCase() !== "f") return
-  if (!gameFrameRef.value) return
 
   event.preventDefault()
-  toggleGameFocusMode()
+  await toggleStageOneGameFullscreen()
 }
 
 async function toggleGameScreenMicrophone() {
@@ -1456,6 +1521,7 @@ function formatChatTime(timestamp) {
 
 <template>
   <main
+    ref="roomPageRef"
     class="room-page"
     :class="{ 'game-focus-mode': isGameFocusMode }"
   >
@@ -1925,18 +1991,24 @@ function formatChatTime(timestamp) {
 
                   <button
                     class="fullscreen-btn"
-                    :class="{ active: isGameFocusMode }"
+                    :class="{ active: isStageOneGameFullscreen }"
                     type="button"
-                    :title="isGameFocusMode ? 'Exit Stage 2' : 'Enter Stage 2'"
-                    @click.stop="toggleGameFocusMode"
+                    :title="isStageOneGameFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'"
+                    @click.stop="toggleStageOneGameFullscreen"
                   >
-                    {{ isGameFocusMode ? "⤺" : "⛶" }}
+                    {{ isStageOneGameFullscreen ? "⤢" : "⛶" }}
                   </button>
                 </div>
               </div>
 
               <div class="fullscreen-hint">
-                {{ isGameFocusMode ? "Exit Stage 2 · Back to Room" : "Enter Stage 2 · Focus Mode" }}
+                {{
+                  isGameFocusMode
+                    ? isStageOneGameFullscreen
+                      ? "Exit Full Screen · ESC"
+                      : "Full Screen · Browser mode"
+                    : "Enter Stage 2 · Focus Mode"
+                }}
               </div>
             </div>
           </section>
@@ -5047,4 +5119,73 @@ function formatChatTime(timestamp) {
   cursor: not-allowed;
   transform: none;
 }
+
+/* =========================================================
+   SECTION 11.10: VOXYN v0.72 Real Browser Fullscreen
+   Purpose:
+   - Make Stage 2 enter true browser fullscreen
+   - Hide browser chrome after user clicks fullscreen button
+   - Keep Game Area + Focus Panel inside the fullscreen shell
+========================================================= */
+
+.room-page.game-focus-mode:fullscreen,
+.room-page.game-focus-mode:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+
+  max-width: none;
+  min-height: 100vh;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+
+  overflow: hidden;
+
+  background:
+    radial-gradient(circle at 48% 0%, rgba(59, 130, 246, 0.24), transparent 36%),
+    linear-gradient(135deg, #020617 0%, #07111f 50%, #0f172a 100%);
+}
+
+.room-page.game-focus-mode:fullscreen .room-main,
+.room-page.game-focus-mode:-webkit-full-screen .room-main {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+
+  padding: 14px;
+  overflow: hidden;
+}
+
+.room-page.game-focus-mode:fullscreen .workspace-grid,
+.room-page.game-focus-mode:-webkit-full-screen .workspace-grid {
+  width: 100%;
+  height: calc(100vh - 28px);
+  height: calc(100dvh - 28px);
+
+  margin-top: 0;
+  overflow: hidden;
+}
+
+.room-page.game-focus-mode:fullscreen .game-area,
+.room-page.game-focus-mode:-webkit-full-screen .game-area {
+  height: calc(100vh - 28px);
+  height: calc(100dvh - 28px);
+
+  border-radius: 22px;
+}
+
+.room-page.game-focus-mode:fullscreen .chat-card,
+.room-page.game-focus-mode:-webkit-full-screen .chat-card {
+  height: calc(100vh - 28px);
+  height: calc(100dvh - 28px);
+}
+
+.room-page.game-focus-mode:fullscreen .fullscreen-btn,
+.room-page.game-focus-mode:-webkit-full-screen .fullscreen-btn {
+  color: white;
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(37, 99, 235, 0.9);
+}
+
 </style>

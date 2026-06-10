@@ -180,3 +180,20 @@ v0.72:
 - Preserve the current dark / liquid-glass VOXYN style.
 - Preserve Section Comment structure.
 - Avoid large rewrites unless necessary.
+
+v0.73
+- Stabilized the Stage 2 game system
+- Added Game Library structure
+- Improved fullscreen / focus mode behavior
+- Kept game logic componentized outside RoomView.vue
+- Prepared GameStage and GameLibrary for future games
+- Added Game 2: Falling Blocks
+- Single-player mini game
+- 10 × 15 board instead of 10 × 20
+- Difficulty modes: Casual / Standard / Fast / Chaos
+- Drop speed changes based on selected difficulty
+- Added Timer / Time Survived feature
+- Added Score / Lines / Level tracking
+- Added Start / Pause / Restart controls
+- Integrated through FallingBlocks.vue, GameStage.vue, and GameLibrary.vue
+

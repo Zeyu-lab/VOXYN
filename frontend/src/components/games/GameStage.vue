@@ -1,8 +1,19 @@
 <script setup>
+/* =========================================================
+   SECTION 1: Imports
+   Purpose:
+   - Load Vue helpers
+   - Load Game Library
+   - Load playable game modules
+========================================================= */
 import { computed, ref } from "vue"
 import GameLibrary from "./GameLibrary.vue"
 import TicTacToe from "./TicTacToe.vue"
+import FallingBlocks from "./FallingBlocks.vue"
 
+/* =========================================================
+   SECTION 2: Props / Emits
+========================================================= */
 const props = defineProps({
   isStageTwo: {
     type: Boolean,
@@ -28,8 +39,30 @@ const props = defineProps({
 
 const emit = defineEmits(["enter-stage-two"])
 
+/* =========================================================
+   SECTION 3: Stage Game State
+========================================================= */
 const selectedGame = ref(null)
 
+/* =========================================================
+   SECTION 4: Game Component Registry
+   Purpose:
+   - Central registry for playable game screens
+   - Add future games here only
+   Notes:
+   - Registry key must match GameLibrary game.id
+   - If a game is not registered here, it falls back to Coming Soon
+========================================================= */
+const gameComponentRegistry = {
+  "tic-tac-toe": TicTacToe,
+  "falling-blocks": FallingBlocks
+  // "click-battle": ClickBattle
+  // "game-2048": Game2048
+}
+
+/* =========================================================
+   SECTION 5: Active Game Computeds
+========================================================= */
 const selectedGameTitle = computed(() => {
   return selectedGame.value?.gameTitle || ""
 })
@@ -38,6 +71,18 @@ const selectedGameMode = computed(() => {
   return selectedGame.value?.mode || ""
 })
 
+const activeGameComponent = computed(() => {
+  if (!selectedGame.value?.gameId) return null
+  return gameComponentRegistry[selectedGame.value.gameId] || null
+})
+
+const isPlayableGame = computed(() => {
+  return Boolean(activeGameComponent.value)
+})
+
+/* =========================================================
+   SECTION 6: Actions
+========================================================= */
 function handleLaunchGame(payload) {
   selectedGame.value = payload
 }
@@ -46,6 +91,7 @@ function backToLibrary() {
   selectedGame.value = null
 }
 </script>
+
 
 <template>
   <section class="game-stage-shell">
@@ -69,21 +115,23 @@ function backToLibrary() {
     </div>
 
     <GameLibrary
-      v-else-if="!selectedGame"
-      @launch-game="handleLaunchGame"
+        v-else-if="!selectedGame"
+        @launch-game="handleLaunchGame"
     />
 
-    <TicTacToe
-      v-else-if="selectedGame.gameId === 'tic-tac-toe'"
-      :mode="selectedGameMode"
-      :room-code="props.roomCode"
-      :user="props.user"
-      @back-to-library="backToLibrary"
+    <component
+        :is="activeGameComponent"
+        v-else-if="isPlayableGame"
+        :mode="selectedGameMode"
+        :room-code="props.roomCode"
+        :user="props.user"
+        :socket="props.socket"
+        @back-to-library="backToLibrary"
     />
 
     <div
-      v-else
-      class="coming-soon-screen"
+        v-else
+        class="coming-soon-screen"
     >
       <div class="coming-icon">◇</div>
 
