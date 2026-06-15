@@ -208,3 +208,24 @@ V0.75
 - Added player count, spectator count, and Take Player Slot behavior
 - Locked game controls for spectators
 - Prepared Tic Tac Toe for true multiplayer sessions in the next version
+
+V0.8
+- Completed custom email OTP signup flow
+- Replaced blocked Brevo SMTP sending with Gmail SMTP App Password
+- Confirmed real verification email delivery through Gmail SMTP
+- Added backend OTP generation, hashing, storage, and verification
+- Stored signup OTP records in Supabase before account creation
+- Created Supabase Auth users only after successful code verification
+- Added 6-digit verification-code screen to Signup.vue
+- Added resend-code and code-expiry behavior
+- Added temporary OTP_DEV_FALLBACK mode for development testing
+- Disabled OTP_DEV_FALLBACK after real Gmail SMTP delivery succeeded
+- Added Beta Access signup fallback for approved testers
+- Added Supabase beta_invites allowlist table
+- Added backend beta-access route for invite-approved registration
+- Created confirmed Supabase Auth users through Beta Access without email OTP
+- Marked beta invites as used after successful registration
+- Added secondary “Beta access without email code” button to Signup.vue
+- Kept Beta Access controlled through Supabase instead of making it a public skip-verification button
+- Confirmed both normal OTP signup and Beta Access signup work end-to-end
+- Established v0.8 as the working authentication milestone before broader friend testing

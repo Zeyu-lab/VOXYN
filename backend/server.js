@@ -9,9 +9,30 @@ const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const crypto = require("crypto");
+const nodemailer = require("nodemailer");
+const { createClient } = require("@supabase/supabase-js");
 const { Server } = require("socket.io");
 
 require("dotenv").config();
+
+console.log("[Supabase Env Check]", {
+  url: process.env.SUPABASE_URL,
+  keyPrefix: process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 12),
+  keyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length,
+  dotCount: (process.env.SUPABASE_SERVICE_ROLE_KEY?.match(/\./g) || []).length,
+});
+
+const jwtPayload = JSON.parse(
+  Buffer.from(
+    process.env.SUPABASE_SERVICE_ROLE_KEY.split(".")[1],
+    "base64url"
+  ).toString("utf8")
+)
+
+console.log("[Supabase Key Role Check]", {
+  role: jwtPayload.role,
+  iss: jwtPayload.iss,
+})
 
 /* =========================================================
    SECTION 2: App Setup
@@ -68,6 +89,510 @@ app.get("/api/health", (req, res) => {
     status: "ok",
     message: "VOXYN API is working",
   });
+});
+/* =========================================================
+   SECTION 3.1: Auth Signup OTP Routes - VOXYN v0.751
+   Purpose:
+   - Request 6-digit signup code
+   - Store hashed OTP in Supabase
+   - Send code by SMTP
+   - Verify code and create Supabase user
+========================================================= */
+
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+const mailer = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 465),
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+console.log("[SMTP Env Check]", {
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  secure: process.env.SMTP_SECURE,
+  user: process.env.SMTP_USER,
+  passLength: process.env.SMTP_PASS?.length,
+  from: process.env.SMTP_FROM,
+});
+
+mailer.verify((error) => {
+  if (error) {
+    console.error("[SMTP] verify failed:", {
+      message: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response,
+    });
+  } else {
+    console.log("[SMTP] ready to send emails");
+  }
+});
+
+
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function generateSixDigitCode() {
+  return crypto.randomInt(100000, 1000000).toString();
+}
+
+function hashOtp(email, code) {
+  return crypto
+    .createHmac("sha256", process.env.OTP_PEPPER)
+    .update(`${normalizeEmail(email)}:${code}`)
+    .digest("hex");
+}
+
+function safeCompareHash(a, b) {
+  const bufferA = Buffer.from(a || "", "hex");
+  const bufferB = Buffer.from(b || "", "hex");
+
+  if (bufferA.length !== bufferB.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(bufferA, bufferB);
+}
+
+async function emailExistsInAuth(email) {
+  const { data, error } = await supabaseAdmin.rpc("voxyn_email_exists", {
+    p_email: email,
+  });
+
+  if (error) {
+    console.error("[Auth OTP] emailExistsInAuth error:", error.message);
+    throw error;
+  }
+
+  return Boolean(data);
+}
+
+app.post("/api/auth/signup/request-code", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const username = String(req.body.username || "").trim();
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        message: "Please enter a valid email.",
+      });
+    }
+
+    if (username.length < 2 || username.length > 24) {
+      return res.status(400).json({
+        message: "Username must be between 2 and 24 characters.",
+      });
+    }
+
+    const alreadyExists = await emailExistsInAuth(email);
+
+    if (alreadyExists) {
+      return res.status(409).json({
+        message: "This email is already registered. Please login instead.",
+      });
+    }
+
+    const { data: latestOtp, error: latestError } = await supabaseAdmin
+      .from("signup_otps")
+      .select("id, resend_available_at")
+      .eq("email", email)
+      .is("consumed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestError) {
+      console.error("[Auth OTP] latest OTP error:", latestError.message);
+      return res.status(500).json({
+        message: "Failed to check verification status.",
+      });
+    }
+
+    if (latestOtp) {
+      const resendAt = new Date(latestOtp.resend_available_at).getTime();
+      const now = Date.now();
+
+      if (resendAt > now) {
+        const waitSeconds = Math.ceil((resendAt - now) / 1000);
+
+        return res.status(429).json({
+          message: `Please wait ${waitSeconds}s before requesting another code.`,
+          waitSeconds,
+        });
+      }
+
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
+        .eq("id", latestOtp.id);
+    }
+
+    const code = generateSixDigitCode();
+    const otpHash = hashOtp(email, code);
+
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+    const resendAvailableAt = new Date(Date.now() + 60 * 1000).toISOString();
+
+    const { data: insertedOtp, error: insertError } = await supabaseAdmin
+      .from("signup_otps")
+      .insert({
+        email,
+        username,
+        otp_hash: otpHash,
+        expires_at: expiresAt,
+        resend_available_at: resendAvailableAt,
+      })
+      .select("id")
+      .single();
+
+    if (insertError) {
+      console.error("[Auth OTP] insert OTP error:", insertError.message);
+      return res.status(500).json({
+        message: "Failed to create verification code.",
+      });
+    }
+
+    try {
+      const mailInfo = await mailer.sendMail({
+        from: process.env.SMTP_FROM,
+        to: email,
+        subject: "Your VOXYN verification code",
+        text: `Your VOXYN verification code is ${code}. It expires in 5 minutes.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+            <h2>VOXYN Verification Code</h2>
+            <p>Your verification code is:</p>
+            <div style="font-size: 28px; font-weight: bold; letter-spacing: 6px;">
+              ${code}
+            </div>
+            <p>This code expires in 5 minutes.</p>
+          </div>
+        `,
+      });
+
+      console.log("[Auth OTP] verification email sent:", {
+        messageId: mailInfo.messageId,
+        accepted: mailInfo.accepted,
+        rejected: mailInfo.rejected,
+        response: mailInfo.response,
+      });
+    } catch (mailError) {
+      console.error("[Auth OTP] mail send error:", {
+        message: mailError.message,
+        code: mailError.code,
+        command: mailError.command,
+        response: mailError.response,
+        responseCode: mailError.responseCode,
+      });
+
+      const allowDevFallback = process.env.OTP_DEV_FALLBACK === "true";
+
+      if (allowDevFallback) {
+        console.warn("[Auth OTP] SMTP failed. Using DEV OTP fallback:", {
+          email,
+          code,
+        });
+
+        return res.json({
+          message: "SMTP failed. Dev verification code generated.",
+          expiresInSeconds: 300,
+          resendCooldownSeconds: 60,
+          deliveryMode: "dev_fallback",
+          devCode: code,
+        });
+      }
+
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
+        .eq("id", insertedOtp.id);
+
+      return res.status(500).json({
+        message: "Failed to send verification email.",
+      });
+    }
+
+    return res.json({
+      message: "Verification code sent.",
+      expiresInSeconds: 300,
+      resendCooldownSeconds: 60,
+    });
+  } catch (error) {
+    console.error("[Auth OTP] request-code error:", error);
+
+    return res.status(500).json({
+      message: "Server error while requesting verification code.",
+    });
+  }
+});
+
+app.post("/api/auth/signup/verify", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || "");
+    const code = String(req.body.code || "").trim();
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        message: "Please enter a valid email.",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters.",
+      });
+    }
+
+    if (!/^\d{6}$/.test(code)) {
+      return res.status(400).json({
+        message: "Code must be 6 digits.",
+      });
+    }
+
+    const { data: otp, error: otpError } = await supabaseAdmin
+      .from("signup_otps")
+      .select("id, email, username, otp_hash, attempts, expires_at")
+      .eq("email", email)
+      .is("consumed_at", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (otpError) {
+      console.error("[Auth OTP] read OTP error:", otpError.message);
+      return res.status(500).json({
+        message: "Failed to verify code.",
+      });
+    }
+
+    if (!otp) {
+      return res.status(400).json({
+        message: "No active verification code. Please request a new one.",
+      });
+    }
+
+    if (new Date(otp.expires_at).getTime() < Date.now()) {
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
+        .eq("id", otp.id);
+
+      return res.status(400).json({
+        message: "Verification code expired. Please request a new one.",
+      });
+    }
+
+    if (otp.attempts >= 5) {
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
+        .eq("id", otp.id);
+
+      return res.status(429).json({
+        message: "Too many attempts. Please request a new code.",
+      });
+    }
+
+    const incomingHash = hashOtp(email, code);
+    const matched = safeCompareHash(incomingHash, otp.otp_hash);
+
+    if (!matched) {
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          attempts: otp.attempts + 1,
+        })
+        .eq("id", otp.id);
+
+      return res.status(400).json({
+        message: "Invalid verification code.",
+      });
+    }
+
+    const alreadyExists = await emailExistsInAuth(email);
+
+    if (alreadyExists) {
+      await supabaseAdmin
+        .from("signup_otps")
+        .update({
+          consumed_at: new Date().toISOString(),
+        })
+        .eq("id", otp.id);
+
+      return res.status(409).json({
+        message: "This email is already registered. Please login instead.",
+      });
+    }
+
+    const { data: createdUser, error: createUserError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          display_name: otp.username,
+          status_message: "Ready to connect.",
+        },
+      });
+
+    if (createUserError) {
+      console.error("[Auth OTP] create user error:", createUserError.message);
+
+      return res.status(400).json({
+        message: createUserError.message || "Failed to create account.",
+      });
+    }
+
+    await supabaseAdmin
+      .from("signup_otps")
+      .update({
+        consumed_at: new Date().toISOString(),
+      })
+      .eq("id", otp.id);
+
+    return res.json({
+      message: "Account created successfully.",
+      userId: createdUser.user?.id,
+    });
+  } catch (error) {
+    console.error("[Auth OTP] verify error:", error);
+
+    return res.status(500).json({
+      message: "Server error while verifying code.",
+    });
+  }
+});
+
+/* =========================================================
+   SECTION 3.2: Auth Signup Beta Access Route - VOXYN v0.754
+   Purpose:
+   - Temporary fallback signup path for approved beta testers
+   - Does not require email OTP
+   - Still verifies approval through Supabase beta_invites table
+   - Creates Supabase Auth user with email_confirm: true
+========================================================= */
+
+app.post("/api/auth/signup/beta-access", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+    const password = String(req.body.password || "");
+    const username = String(req.body.username || "").trim();
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        message: "Please enter a valid email.",
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        message: "Password must be at least 6 characters.",
+      });
+    }
+
+    const displayName =
+      username.length >= 2 && username.length <= 24
+        ? username
+        : email.split("@")[0];
+
+    const alreadyExists = await emailExistsInAuth(email);
+
+    if (alreadyExists) {
+      return res.status(409).json({
+        message: "This email is already registered. Please login instead.",
+      });
+    }
+
+    const { data: invite, error: inviteError } = await supabaseAdmin
+      .from("beta_invites")
+      .select("id, email, used_at")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (inviteError) {
+      console.error("[Beta Access] invite check error:", inviteError.message);
+
+      return res.status(500).json({
+        message: "Failed to check beta access.",
+      });
+    }
+
+    if (!invite) {
+      return res.status(403).json({
+        message: "This email is not approved for beta access.",
+      });
+    }
+
+    if (invite.used_at) {
+      return res.status(409).json({
+        message: "This beta access has already been used.",
+      });
+    }
+
+    const { data: createdUser, error: createUserError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: {
+          display_name: displayName,
+          status_message: "Ready to connect.",
+          signup_method: "beta_access",
+        },
+      });
+
+    if (createUserError) {
+      console.error("[Beta Access] create user error:", createUserError.message);
+
+      return res.status(400).json({
+        message: createUserError.message || "Failed to create beta account.",
+      });
+    }
+
+    const { error: markUsedError } = await supabaseAdmin
+      .from("beta_invites")
+      .update({
+        used_at: new Date().toISOString(),
+      })
+      .eq("id", invite.id);
+
+    if (markUsedError) {
+      console.error("[Beta Access] mark used error:", markUsedError.message);
+    }
+
+    return res.json({
+      message: "Beta account created successfully.",
+      userId: createdUser.user?.id,
+    });
+  } catch (error) {
+    console.error("[Beta Access] signup error:", error);
+
+    return res.status(500).json({
+      message: "Server error while creating beta account.",
+    });
+  }
 });
 
 /* =========================================================
@@ -1611,7 +2136,7 @@ io.on("connection", (socket) => {
     }
 
     const room = rooms.get(roomCode);
-    
+
     removeSocketFromAllGameSessions(roomCode, socket.id);
     if (room) {
       room.users.delete(socket.id);

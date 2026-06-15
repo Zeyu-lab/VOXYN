@@ -4,7 +4,6 @@
 ========================================================= */
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
-import { supabase } from "../lib/supabaseClient"
 
 /* =========================================================
    SECTION 2: Router / Form State
@@ -14,16 +13,21 @@ const router = useRouter()
 const email = ref("")
 const password = ref("")
 const confirmPassword = ref("")
+const verificationCode = ref("")
 
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 const loading = ref(false)
+const betaLoading = ref(false)
 const resendLoading = ref(false)
+const verifyLoading = ref(false)
 
 const errorMessage = ref("")
 const successMessage = ref("")
 const signupStep = ref("form")
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ""
 
 /* =========================================================
    SECTION 3: Computed
@@ -38,6 +42,16 @@ const confirmPasswordInputType = computed(() => {
 
 const cleanEmail = computed(() => {
   return email.value.trim().toLowerCase()
+})
+
+const defaultDisplayName = computed(() => {
+  const baseName = cleanEmail.value.split("@")[0] || "voxyn-user"
+
+  if (baseName.length < 2) {
+    return "voxyn-user"
+  }
+
+  return baseName.slice(0, 24)
 })
 
 /* =========================================================
@@ -88,12 +102,21 @@ function validateSignupForm() {
   return true
 }
 
+async function readApiMessage(response) {
+  try {
+    const data = await response.json()
+    return data.message || "Request failed."
+  } catch {
+    return "Request failed."
+  }
+}
+
 /* =========================================================
-   SECTION 6: Create Account
+   SECTION 6: Request Signup Code
    Purpose:
-   - Email is username
-   - Password + confirm password
-   - Supabase sends verification email
+   - Validate email/password locally
+   - Ask Express backend to send a 6-digit code
+   - Backend checks existing account and sends SMTP email
 ========================================================= */
 async function createAccount() {
   clearMessages()
@@ -102,39 +125,134 @@ async function createAccount() {
 
   loading.value = true
 
-  const defaultDisplayName = cleanEmail.value.split("@")[0]
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/signup/request-code`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: cleanEmail.value,
+        username: defaultDisplayName.value
+      })
+    })
 
-  const { data, error } = await supabase.auth.signUp({
-    email: cleanEmail.value,
-    password: password.value,
-    options: {
-      emailRedirectTo: `${window.location.origin}/login`,
-      data: {
-        display_name: defaultDisplayName
-      }
+    const data = await response.json()
+
+    if (!response.ok) {
+        throw new Error(data.message || "Failed to send verification code.")
     }
-  })
 
-  loading.value = false
+    signupStep.value = "verify"
 
-  if (error) {
-    errorMessage.value = error.message
-    return
-  }
-
-  signupStep.value = "verify"
-  successMessage.value = `Account created. Verification email sent to ${cleanEmail.value}.`
-
-  if (data.session) {
-    successMessage.value =
-      "Account created. Email verification may be disabled in Supabase, so you can log in now."
+    if (data.deliveryMode === "dev_fallback" && data.devCode) {
+        successMessage.value = `SMTP failed, but dev code is ready: ${data.devCode}`
+    } else {
+        successMessage.value = `Verification code sent to ${cleanEmail.value}.`
+    }
+        errorMessage.value = error.message || "Failed to send verification code."
+  } finally {
+    loading.value = false
   }
 }
 
 /* =========================================================
-   SECTION 7: Resend Verification Email
+   SECTION 6.5: Beta Access Signup
+   Purpose:
+   - Temporary fallback for approved testers
+   - Does not send email OTP
+   - Backend checks Supabase beta_invites table
+   - Backend creates confirmed Supabase Auth account
 ========================================================= */
-async function resendVerificationEmail() {
+async function createBetaAccount() {
+  clearMessages()
+
+  if (!validateSignupForm()) return
+
+  betaLoading.value = true
+
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/signup/beta-access`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: cleanEmail.value,
+        password: password.value,
+        username: defaultDisplayName.value
+      })
+    })
+
+    if (!response.ok) {
+      const message = await readApiMessage(response)
+      throw new Error(message)
+    }
+
+    successMessage.value = "Beta account created successfully. Redirecting to login..."
+
+    setTimeout(() => {
+      goLogin()
+    }, 900)
+  } catch (error) {
+    errorMessage.value = error.message || "Beta access signup failed."
+  } finally {
+    betaLoading.value = false
+  }
+}
+
+/* =========================================================
+   SECTION 7: Verify Signup Code
+   Purpose:
+   - Send email/password/code to Express backend
+   - Backend verifies OTP and creates Supabase user
+========================================================= */
+async function verifySignupCode() {
+  clearMessages()
+
+  const code = verificationCode.value.trim()
+
+  if (!/^\d{6}$/.test(code)) {
+    errorMessage.value = "Please enter the 6-digit verification code."
+    return
+  }
+
+  verifyLoading.value = true
+
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/signup/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: cleanEmail.value,
+        password: password.value,
+        code
+      })
+    })
+
+    if (!response.ok) {
+      const message = await readApiMessage(response)
+      throw new Error(message)
+    }
+
+    successMessage.value = "Account created successfully. Redirecting to login..."
+
+    setTimeout(() => {
+      goLogin()
+    }, 900)
+  } catch (error) {
+    errorMessage.value = error.message || "Failed to verify code."
+  } finally {
+    verifyLoading.value = false
+  }
+}
+
+/* =========================================================
+   SECTION 8: Resend Signup Code
+========================================================= */
+async function resendVerificationCode() {
   clearMessages()
 
   if (!cleanEmail.value) {
@@ -144,22 +262,29 @@ async function resendVerificationEmail() {
 
   resendLoading.value = true
 
-  const { error } = await supabase.auth.resend({
-    type: "signup",
-    email: cleanEmail.value,
-    options: {
-      emailRedirectTo: `${window.location.origin}/login`
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/signup/request-code`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        email: cleanEmail.value,
+        username: defaultDisplayName.value
+      })
+    })
+
+    if (!response.ok) {
+      const message = await readApiMessage(response)
+      throw new Error(message)
     }
-  })
 
-  resendLoading.value = false
-
-  if (error) {
-    errorMessage.value = error.message
-    return
+    successMessage.value = `Verification code resent to ${cleanEmail.value}.`
+  } catch (error) {
+    errorMessage.value = error.message || "Failed to resend verification code."
+  } finally {
+    resendLoading.value = false
   }
-
-  successMessage.value = `Verification email resent to ${cleanEmail.value}.`
 }
 </script>
 
@@ -257,59 +382,104 @@ async function resendVerificationEmail() {
               </div>
             </div>
 
-            <button class="primary-button" type="submit" :disabled="loading">
-              {{ loading ? "Creating account..." : "Create account" }}
+            <button
+                class="primary-button"
+                type="submit"
+                :disabled="loading || betaLoading"
+            >
+                {{ loading ? "Sending verification code..." : "Create account" }}
             </button>
+
+                <div class="beta-divider">
+                    <span></span>
+                    <p>For approved testers</p>
+                    <span></span>
+                </div>
+
+            <button
+                class="beta-access-button"
+                type="button"
+                @click="createBetaAccount"
+                :disabled="loading || betaLoading"
+            >
+                {{ betaLoading ? "Checking beta access..." : "Beta access without email code" }}
+            </button>
+
+                <p class="beta-note">
+                    Use normal signup for email verification. Use beta access only if your email is approved in Supabase.
+                </p>
 
             <button
                 class="secondary-button"
                 type="button"
                 @click="goLogin"
-                :disabled="loading"
+                :disabled="loading || betaLoading"
             >
                 Back to login
             </button>
-
           </form>
         </template>
 
         <template v-else>
-          <div class="verify-panel">
-            <div class="verify-icon">✉</div>
+            <div class="verify-panel">
+                <div class="verify-icon">✉</div>
 
-            <p class="card-kicker">VERIFY ACCOUNT</p>
-            <h1>Account created</h1>
+                <p class="card-kicker">VERIFY ACCOUNT</p>
+                <h1>Check your email</h1>
 
-            <p class="card-description">
-                We sent a verification email to
+                <p class="card-description">
+                We sent a 6-digit verification code to
                 <strong>{{ cleanEmail }}</strong>.
-                You can continue to login for now. Email verification can be enforced later.
-            </p>
-            
-            <button class="primary-button" @click="goLogin">
-                Go to login page
-            </button>
+                Enter the code below to finish creating your VOXYN account.
+                </p>
 
-            <button
-                class="secondary-button"
-                @click="resendVerificationEmail"
-                :disabled="resendLoading"
-            >
-                {{ resendLoading ? "Sending..." : "Resend email" }}
-            </button>
+                <form class="auth-form" @submit.prevent="verifySignupCode">
+                <div class="input-group">
+                    <label>Verification code</label>
+                    <div class="input-shell">
+                    <span class="input-icon">#</span>
+                    <input
+                        v-model="verificationCode"
+                        type="text"
+                        maxlength="6"
+                        inputmode="numeric"
+                        placeholder="Enter 6-digit code"
+                        autocomplete="one-time-code"
+                    />
+                    </div>
+                </div>
 
-            <button
-                class="text-button"
-                type="button"
-                @click="goLogin"
-            >
-                Back to login
-            </button>
+                <button
+                    class="primary-button"
+                    type="submit"
+                    :disabled="verifyLoading"
+                >
+                    {{ verifyLoading ? "Verifying..." : "Verify and create account" }}
+                </button>
 
-            <p class="verify-hint">
-              Didn't get the email? Check your spam folder or resend the verification email.
-            </p>
-          </div>
+                <button
+                    class="secondary-button"
+                    type="button"
+                    @click="resendVerificationCode"
+                    :disabled="resendLoading || verifyLoading"
+                >
+                    {{ resendLoading ? "Sending..." : "Resend code" }}
+                </button>
+
+                <button
+                    class="text-button"
+                    type="button"
+                    @click="signupStep = 'form'"
+                    :disabled="verifyLoading"
+                >
+                    Back to edit email
+                </button>
+                </form>
+
+                <p class="verify-hint">
+                The code expires in 5 minutes. Check your spam folder if you do not see it.
+                </p>
+            </div>
         </template>
 
         <p v-if="errorMessage" class="error-message">
@@ -638,6 +808,80 @@ async function resendVerificationEmail() {
   border: 1px solid rgba(148, 163, 184, 0.28);
   color: #0f172a;
   background: rgba(255, 255, 255, 0.82);
+}
+
+.beta-divider {
+  margin: 4px 0 -2px;
+
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.beta-divider span {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.26);
+}
+
+.beta-divider p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.beta-access-button {
+  width: 100%;
+  min-height: 56px;
+
+  border: 1px solid rgba(79, 70, 229, 0.42);
+  border-radius: 16px;
+
+  color: #4f46e5;
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(79, 70, 229, 0.04)),
+    rgba(255, 255, 255, 0.86);
+
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 950;
+
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease,
+    opacity 0.18s ease;
+}
+
+.beta-access-button:hover {
+  transform: translateY(-2px);
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(79, 70, 229, 0.07)),
+    rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.12);
+}
+
+.beta-access-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
+}
+
+.beta-note {
+  margin: -4px 0 0;
+  padding: 12px 13px;
+
+  border: 1px solid rgba(99, 102, 241, 0.14);
+  border-radius: 14px;
+
+  color: #64748b;
+  background: rgba(99, 102, 241, 0.06);
+
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 750;
 }
 
 .primary-button:hover,
