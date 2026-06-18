@@ -154,11 +154,10 @@ function backToLibrary() {
 
 <style scoped>
 /* =========================================================
-   SECTION 1: Game Stage Shell
-   Purpose:
-   - Let GameLibrary / game pages control their own layout
-   - Avoid forcing every game screen into center grid
-   - Allow parent Game Area to scroll when content is taller
+   SECTION 1: Game Stage Shell - White Liquid Glass Base
+   Notes:
+   - Style-only change
+   - No component registry / game launch behavior changed
 ========================================================= */
 .game-stage-shell {
   position: relative;
@@ -173,6 +172,13 @@ function backToLibrary() {
   text-align: center;
   overflow: visible;
   box-sizing: border-box;
+  color: #101828;
+
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(96, 165, 250, 0.18), transparent 30%),
+    radial-gradient(circle at 84% 14%, rgba(168, 85, 247, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,0.72), rgba(244,248,255,0.68));
 }
 
 /* =========================================================
@@ -185,6 +191,9 @@ function backToLibrary() {
   display: grid;
   align-content: center;
   justify-items: center;
+
+  padding: 44px 22px;
+  box-sizing: border-box;
 }
 
 .cube-mark-local,
@@ -193,29 +202,29 @@ function backToLibrary() {
   height: 78px;
   display: grid;
   place-items: center;
-  border-radius: 24px;
+  border-radius: 26px;
   color: white;
-  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  background: linear-gradient(135deg, #0a84ff, #4f46e5);
   font-size: 32px;
   box-shadow:
-    0 22px 58px rgba(59, 130, 246, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+    0 22px 54px rgba(37, 99, 235, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .stage-one-intro p,
 .coming-soon-screen p {
   margin: 24px 0 0;
-  color: white;
+  color: #101828;
   font-size: 40px;
   font-weight: 950;
   letter-spacing: 0.34em;
-  text-shadow: 0 16px 50px rgba(15, 23, 42, 0.68);
+  text-shadow: none;
 }
 
 .stage-one-intro h2,
 .coming-soon-screen h2 {
   margin: 10px 0 20px;
-  color: #cbd5e1;
+  color: #667085;
   font-size: 17px;
   text-transform: uppercase;
   letter-spacing: 0.26em;
@@ -223,7 +232,7 @@ function backToLibrary() {
 
 .stage-one-intro span,
 .coming-soon-screen span {
-  color: #60a5fa;
+  color: #0a84ff;
   font-size: 18px;
   font-weight: 950;
 }
@@ -232,7 +241,7 @@ function backToLibrary() {
 .coming-soon-screen small {
   display: block;
   margin-top: 8px;
-  color: #dbeafe;
+  color: #667085;
   font-size: 14px;
   font-weight: 750;
 }
@@ -242,13 +251,24 @@ function backToLibrary() {
   margin-top: 30px;
   min-height: 54px;
   padding: 0 34px;
-  border: none;
+  border: 1px solid rgba(37, 99, 235, 0.16);
   border-radius: 999px;
   color: white;
-  background: linear-gradient(135deg, #3b82f6, #4f46e5);
+  background: linear-gradient(135deg, #0a84ff, #4f46e5);
   font-size: 15px;
   font-weight: 950;
   cursor: pointer;
-  box-shadow: 0 18px 44px rgba(59, 130, 246, 0.34);
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.22);
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease,
+    filter 0.16s ease;
+}
+
+.stage-one-intro button:hover,
+.coming-soon-screen button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 22px 48px rgba(37, 99, 235, 0.28);
 }
 </style>

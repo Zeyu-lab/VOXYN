@@ -5,17 +5,13 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
 /*
-  Dev mode:
-  - Vite runs on localhost:5173
-  - Backend runs on localhost:3001
-
-  Production / HTTPS tunnel mode:
-  - Express serves frontend and backend from the same origin
-  - Socket should connect to window.location.origin
+  Socket strategy:
+  - If VITE_SOCKET_URL is set, use it.
+  - If VITE_SOCKET_URL is empty, use current page origin.
+  - Local dev: http://localhost:5173/socket.io -> Vite proxy -> localhost:3001
+  - Cloudflare: https://xxx.trycloudflare.com/socket.io -> Vite proxy -> localhost:3001
 */
-const SOCKET_URL = import.meta.env.DEV
-  ? import.meta.env.VITE_SOCKET_URL || "http://localhost:3001"
-  : window.location.origin
+const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || "").trim() || window.location.origin
 
 console.log("Supabase URL:", supabaseUrl)
 console.log("Supabase key loaded:", !!supabaseKey)
@@ -32,6 +28,7 @@ if (!supabaseKey) {
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
 export const socket = io(SOCKET_URL, {
+  path: "/socket.io",
   autoConnect: false,
   transports: ["websocket", "polling"],
   withCredentials: true,
