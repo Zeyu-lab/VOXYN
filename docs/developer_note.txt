@@ -229,3 +229,51 @@ V0.8
 - Kept Beta Access controlled through Supabase instead of making it a public skip-verification button
 - Confirmed both normal OTP signup and Beta Access signup work end-to-end
 - Established v0.8 as the working authentication milestone before broader friend testing
+
+
+v0.801 Update
+
+* Stabilized the custom email OTP signup flow for local and external tester usage.
+* Confirmed that the normal Create Account flow can successfully request a 6-digit verification code from the Express backend.
+* Verified Gmail SMTP delivery in real testing:
+
+  * Frontend sends signup request.
+  * Backend receives `/api/auth/signup/request-code`.
+  * Backend generates and stores OTP.
+  * Gmail SMTP sends the 6-digit verification code to the user's email.
+  * Frontend moves to the Verify Account page.
+* Fixed the environment mismatch issue between local testing and Cloudflare Quick Tunnel testing.
+* Learned that `localhost:3001` only works on the developer's own machine. When a friend opens the Cloudflare HTTPS link, their browser cannot access the developer machine's `localhost`.
+* Updated the frontend API strategy so that Cloudflare testing can use relative API paths instead of hardcoded local backend URLs.
+* Added Vite development proxy support:
+
+  * `/api` is proxied to `http://localhost:3001`
+  * `/socket.io` is proxied to `http://localhost:3001`
+* Added Cloudflare-compatible Vite dev server settings:
+
+  * `host: "0.0.0.0"`
+  * `allowedHosts: true`
+* Confirmed that a single Cloudflare frontend tunnel can be shared with external testers.
+* External tester flow now works as:
+
+  * Friend opens the Cloudflare HTTPS link.
+  * Friend enters email and password.
+  * Browser sends request to the same Cloudflare origin.
+  * Vite proxy forwards `/api` requests to the local Express backend.
+  * Backend sends the 6-digit OTP email through Gmail SMTP.
+* This avoids needing a second backend tunnel during temporary development testing.
+* Current working test setup:
+
+  * Backend: `node server.js`
+  * Frontend: `npm run dev -- --host 0.0.0.0`
+  * Tunnel: `cloudflared tunnel --url http://localhost:5173`
+* Important security note:
+
+  * `.env` files must not be committed to GitHub.
+  * Supabase service role keys, SMTP passwords, OTP pepper, and other private credentials should stay local only.
+  * If any secret was exposed in screenshots or pushed to a public repository, rotate the affected keys/passwords.
+
+Result:
+
+* v0.801 confirms that VOXYN's custom OTP signup flow works for both local testing and temporary external tester registration through a Cloudflare Quick Tunnel.
+* The auth flow is now stable enough for approved friends/testers to register using their own email and receive a real 6-digit verification code.

@@ -27,7 +27,11 @@ const errorMessage = ref("")
 const successMessage = ref("")
 const signupStep = ref("form")
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || ""
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").trim()
+
+function apiUrl(path) {
+  return API_BASE ? `${API_BASE}${path}` : path
+}
 
 /* =========================================================
    SECTION 3: Computed
@@ -110,7 +114,6 @@ async function readApiMessage(response) {
     return "Request failed."
   }
 }
-
 /* =========================================================
    SECTION 6: Request Signup Code
    Purpose:
@@ -126,7 +129,7 @@ async function createAccount() {
   loading.value = true
 
   try {
-    const response = await fetch(`${API_BASE}/api/auth/signup/request-code`, {
+    const response = await fetch(apiUrl("/api/auth/signup/request-code"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -140,17 +143,18 @@ async function createAccount() {
     const data = await response.json()
 
     if (!response.ok) {
-        throw new Error(data.message || "Failed to send verification code.")
+      throw new Error(data.message || "Failed to send verification code.")
     }
 
     signupStep.value = "verify"
 
     if (data.deliveryMode === "dev_fallback" && data.devCode) {
-        successMessage.value = `SMTP failed, but dev code is ready: ${data.devCode}`
+      successMessage.value = `SMTP failed, but dev code is ready: ${data.devCode}`
     } else {
-        successMessage.value = `Verification code sent to ${cleanEmail.value}.`
+      successMessage.value = `Verification code sent to ${cleanEmail.value}.`
     }
-        errorMessage.value = error.message || "Failed to send verification code."
+  } catch (error) {
+    errorMessage.value = error.message || "Failed to send verification code."
   } finally {
     loading.value = false
   }
@@ -172,7 +176,7 @@ async function createBetaAccount() {
   betaLoading.value = true
 
   try {
-    const response = await fetch(`${API_BASE}/api/auth/signup/beta-access`, {
+    const response = await fetch(apiUrl("/api/auth/signup/beta-access"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -220,7 +224,7 @@ async function verifySignupCode() {
   verifyLoading.value = true
 
   try {
-    const response = await fetch(`${API_BASE}/api/auth/signup/verify`, {
+    const response = await fetch(apiUrl("/api/auth/signup/verify"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -263,7 +267,7 @@ async function resendVerificationCode() {
   resendLoading.value = true
 
   try {
-    const response = await fetch(`${API_BASE}/api/auth/signup/request-code`, {
+    const response = await fetch(apiUrl("/api/auth/signup/request-code"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
