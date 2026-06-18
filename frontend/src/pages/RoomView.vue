@@ -243,15 +243,57 @@ function goRoomRail(item) {
 
 const voiceChannelNames = ["Lobby", "Squad", "Break"]
 
+function getLocalVoiceUserForChannel(channelName) {
+  const username = displayName.value || user.value?.email || "You"
+  const localSpeaking =
+    hasJoinedVoice.value && isMicOn.value && !isDeafened.value && isSpeaking.value
+
+  return normalizeVoiceUser(
+    {
+      id: user.value?.id || socket.id || "local-voice-user",
+      socketId: socket.id || "local-voice-user",
+      userId: user.value?.id || "local-voice-user",
+      username,
+      avatarUrl: avatarUrl.value,
+      initial: profileInitial.value || getUserInitial(username),
+      voiceChannel: channelName,
+      micOn: hasJoinedVoice.value && isMicOn.value,
+      isMicOn: hasJoinedVoice.value && isMicOn.value,
+      deafened: hasJoinedVoice.value && isDeafened.value,
+      isDeafened: hasJoinedVoice.value && isDeafened.value,
+      speaking: localSpeaking,
+      isSpeaking: localSpeaking
+    },
+    0
+  )
+}
+
+function buildVoiceUsersForChannel(channelName) {
+  const usersInChannel = onlineUsers.value
+    .filter((onlineUser) => {
+      return onlineUser.voiceChannel === channelName
+    })
+    .map((onlineUser, index) => {
+      return normalizeVoiceUser(onlineUser, index)
+    })
+
+  const shouldShowLocalUser =
+    hasJoinedVoice.value && selectedVoiceChannel.value === channelName
+
+  const alreadyHasLocalUser = usersInChannel.some((voiceUser) => {
+    return isCurrentVoiceUser(voiceUser)
+  })
+
+  if (shouldShowLocalUser && !alreadyHasLocalUser) {
+    usersInChannel.unshift(getLocalVoiceUserForChannel(channelName))
+  }
+
+  return usersInChannel
+}
+
 const voiceChannels = computed(() => {
   return voiceChannelNames.map((name) => {
-    const usersInChannel = onlineUsers.value
-      .filter((onlineUser) => {
-        return onlineUser.voiceChannel === name
-      })
-      .map((onlineUser, index) => {
-        return normalizeVoiceUser(onlineUser, index)
-      })
+    const usersInChannel = buildVoiceUsersForChannel(name)
 
     return {
       name,
@@ -262,13 +304,7 @@ const voiceChannels = computed(() => {
 })
 
 const currentVoiceMembers = computed(() => {
-  return onlineUsers.value
-    .filter((onlineUser) => {
-      return onlineUser.voiceChannel === selectedVoiceChannel.value
-    })
-    .map((onlineUser, index) => {
-      return normalizeVoiceUser(onlineUser, index)
-    })
+  return buildVoiceUsersForChannel(selectedVoiceChannel.value || defaultVoiceChannel)
 })
 
 const chatMessages = ref([
@@ -5186,6 +5222,538 @@ function formatChatTime(timestamp) {
   color: white;
   border-color: rgba(96, 165, 250, 0.7);
   background: rgba(37, 99, 235, 0.9);
+}
+
+
+/* =========================================================
+   SECTION 11.11: VOXYN White Liquid Glass Override
+   Purpose:
+   - Style-only pass for RoomView
+   - Keep existing template / script / voice / game logic unchanged
+   - Convert Stage 2 shell, Focus Panel, and voice dock to white Apple glass
+========================================================= */
+.room-page {
+  --voxyn-text: #101828;
+  --voxyn-muted: #667085;
+  --voxyn-soft: #98a2b3;
+  --voxyn-line: rgba(148, 163, 184, 0.22);
+  --voxyn-glass: rgba(255, 255, 255, 0.68);
+  --voxyn-glass-strong: rgba(255, 255, 255, 0.84);
+  --voxyn-blue: #007aff;
+  --voxyn-blue-2: #3b82f6;
+  --voxyn-purple: #af52de;
+  --voxyn-green: #34c759;
+  --voxyn-red: #ff3b30;
+
+  background:
+    radial-gradient(circle at 16% 4%, rgba(0, 122, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 84% 8%, rgba(175, 82, 222, 0.11), transparent 30%),
+    linear-gradient(180deg, #fbfdff 0%, #eef4fb 100%);
+  color: var(--voxyn-text);
+}
+
+.room-page.game-focus-mode,
+.room-page.game-focus-mode:fullscreen,
+.room-page.game-focus-mode:-webkit-full-screen {
+  background:
+    radial-gradient(circle at 14% 7%, rgba(0, 122, 255, 0.18), transparent 32%),
+    radial-gradient(circle at 86% 4%, rgba(175, 82, 222, 0.14), transparent 30%),
+    radial-gradient(circle at 70% 92%, rgba(52, 199, 89, 0.08), transparent 36%),
+    linear-gradient(180deg, #fbfdff 0%, #eef4fb 100%) !important;
+  color: var(--voxyn-text);
+}
+
+.left-rail,
+.room-header,
+.create-strip,
+.room-code-card,
+.channels-card,
+.member-bar,
+.chat-card,
+.back-btn,
+.loading-card,
+.error-card {
+  background: var(--voxyn-glass-strong) !important;
+  border: 1px solid rgba(255, 255, 255, 0.78) !important;
+  box-shadow:
+    0 22px 70px rgba(31, 41, 55, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+}
+
+.back-btn,
+.room-action-btn,
+.invite-btn,
+.copy-btn,
+.chat-header button,
+.voice-control-btn {
+  color: #1d2939 !important;
+  background: rgba(255, 255, 255, 0.74) !important;
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  box-shadow:
+    0 10px 28px rgba(31, 41, 55, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.room-action-btn.danger,
+.voice-control-btn.leave {
+  color: var(--voxyn-red) !important;
+  background: rgba(255, 59, 48, 0.08) !important;
+  border-color: rgba(255, 59, 48, 0.18) !important;
+}
+
+.live-pill,
+.voice-control-btn.active {
+  color: #067647 !important;
+  background: rgba(52, 199, 89, 0.12) !important;
+  border: 1px solid rgba(52, 199, 89, 0.18) !important;
+}
+
+.rail-logo,
+.room-icon-box,
+.avatar.owner,
+.chat-avatar,
+.voice-user-avatar,
+.chat-input button {
+  background: linear-gradient(135deg, #60a5fa 0%, #007aff 52%, #7c3aed 100%) !important;
+  box-shadow: 0 18px 42px rgba(0, 122, 255, 0.22) !important;
+}
+
+.channel-item:hover,
+.channel-item.simple:hover {
+  background: rgba(255, 255, 255, 0.72) !important;
+}
+
+.channel-item.active,
+.member-progress div {
+  background: linear-gradient(135deg, #60a5fa, #007aff) !important;
+  box-shadow: 0 14px 30px rgba(0, 122, 255, 0.18) !important;
+}
+
+/* Main game screen / Stage 2 shell */
+.game-area,
+.room-page.game-focus-mode .game-area,
+.room-page.game-focus-mode:fullscreen .game-area,
+.room-page.game-focus-mode:-webkit-full-screen .game-area {
+  color: var(--voxyn-text) !important;
+  background:
+    radial-gradient(circle at 16% 14%, rgba(0, 122, 255, 0.16), transparent 34%),
+    radial-gradient(circle at 88% 12%, rgba(175, 82, 222, 0.12), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.48)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.82) !important;
+  box-shadow:
+    0 24px 90px rgba(31, 41, 55, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+}
+
+.game-ambient-layer {
+  background:
+    radial-gradient(circle at 18% 12%, rgba(0, 122, 255, 0.10), transparent 30%),
+    radial-gradient(circle at 80% 20%, rgba(175, 82, 222, 0.10), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.12)) !important;
+  opacity: 1 !important;
+}
+
+.game-ambient-layer::before {
+  background: rgba(255, 255, 255, 0.36) !important;
+  box-shadow:
+    inset -18px -20px 40px rgba(0, 122, 255, 0.10),
+    0 18px 52px rgba(0, 122, 255, 0.08) !important;
+}
+
+.game-ambient-layer::after {
+  background: radial-gradient(ellipse at center, rgba(0, 122, 255, 0.16), transparent 68%) !important;
+}
+
+.game-area p {
+  color: #101828 !important;
+  text-shadow: none !important;
+}
+
+.game-area h2,
+.game-area small {
+  color: #667085 !important;
+}
+
+.game-area span {
+  color: var(--voxyn-blue) !important;
+}
+
+.cube-mark,
+.game-hero-content > button {
+  background: linear-gradient(135deg, #60a5fa, #007aff) !important;
+  box-shadow: 0 18px 46px rgba(0, 122, 255, 0.26) !important;
+}
+
+.game-latency-pill,
+.stage-two-game-topbar,
+.game-player-controls,
+.quality-pill,
+.game-voice-status,
+.fullscreen-hint {
+  color: #344054 !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.78) !important;
+  box-shadow:
+    0 16px 46px rgba(31, 41, 55, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+}
+
+.stage-two-room-info,
+.stage-two-room-info strong,
+.quality-pill strong {
+  color: #101828 !important;
+}
+
+.stage-two-room-info span,
+.quality-pill span {
+  color: #667085 !important;
+}
+
+.stage-live-dot {
+  color: var(--voxyn-blue) !important;
+}
+
+.exit-stage-btn,
+.game-player-controls button,
+.fullscreen-btn {
+  color: #344054 !important;
+  background: rgba(255, 255, 255, 0.76) !important;
+  border: 1px solid rgba(148, 163, 184, 0.22) !important;
+  box-shadow:
+    0 10px 28px rgba(31, 41, 55, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.exit-stage-btn:hover,
+.game-player-controls button:hover:not(:disabled),
+.fullscreen-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 122, 255, 0.28) !important;
+  box-shadow:
+    0 16px 34px rgba(0, 122, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.game-player-controls button.active,
+.room-page.game-focus-mode .mic-control-btn.active,
+.room-page.game-focus-mode .deafen-control-btn.active,
+.room-page.game-focus-mode:fullscreen .fullscreen-btn,
+.room-page.game-focus-mode:-webkit-full-screen .fullscreen-btn,
+.fullscreen-btn.active {
+  color: white !important;
+  background: linear-gradient(135deg, #60a5fa, #007aff) !important;
+  border-color: rgba(0, 122, 255, 0.32) !important;
+  box-shadow: 0 14px 34px rgba(0, 122, 255, 0.24) !important;
+}
+
+.room-page.game-focus-mode .deafen-control-btn,
+.room-page.game-focus-mode .mic-control-btn,
+.room-page.game-focus-mode .leave-channel-icon-btn {
+  background: rgba(255, 255, 255, 0.76) !important;
+}
+
+.room-page.game-focus-mode .deafen-control-btn.deafened,
+.room-page.game-focus-mode .leave-channel-icon-btn,
+.room-page.game-focus-mode .leave-channel-icon-btn.active {
+  color: var(--voxyn-red) !important;
+  background: rgba(255, 59, 48, 0.08) !important;
+  border-color: rgba(255, 59, 48, 0.18) !important;
+  box-shadow: 0 12px 30px rgba(255, 59, 48, 0.10) !important;
+}
+
+.game-voice-status.connected,
+.game-voice-status.speaking {
+  color: #067647 !important;
+  background: rgba(52, 199, 89, 0.10) !important;
+  border-color: rgba(52, 199, 89, 0.18) !important;
+}
+
+.game-voice-status.muted,
+.game-voice-status.deafened {
+  color: #b42318 !important;
+  background: rgba(255, 59, 48, 0.08) !important;
+  border-color: rgba(255, 59, 48, 0.16) !important;
+}
+
+.stage-two-game-scroll-shell {
+  border-radius: 22px;
+}
+
+.stage-two-game-scroll-shell::-webkit-scrollbar-thumb {
+  background: rgba(0, 122, 255, 0.28) !important;
+}
+
+/* Child game components inside Stage 2 */
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-stage),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-library-shell) {
+  background: transparent !important;
+  color: #101828 !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-card),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-row) {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.82) !important;
+  box-shadow:
+    0 18px 52px rgba(31, 41, 55, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(22px) saturate(180%);
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-card:hover),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-row:hover) {
+  border-color: rgba(0, 122, 255, 0.28) !important;
+  box-shadow:
+    0 22px 62px rgba(0, 122, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90) !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-cover),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-art) {
+  background:
+    radial-gradient(circle at 24% 24%, rgba(0, 122, 255, 0.20), transparent 34%),
+    radial-gradient(circle at 82% 68%, rgba(175, 82, 222, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(235, 244, 255, 0.62)) !important;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-content h3),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-content p),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-info strong) {
+  color: #101828 !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-content span),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.game-meta span),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-game-info span) {
+  color: #667085 !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.mode-btn),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-mode-btn),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.filter-chip),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.search-box) {
+  background: rgba(255, 255, 255, 0.76) !important;
+  color: #344054 !important;
+  border: 1px solid rgba(148, 163, 184, 0.20) !important;
+}
+
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.mode-btn.multiplayer),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.compact-mode-btn.multiplayer),
+.room-page.game-focus-mode .stage-two-game-scroll-shell :deep(.filter-chip.active) {
+  color: white !important;
+  background: linear-gradient(135deg, #60a5fa, #007aff) !important;
+  border-color: rgba(0, 122, 255, 0.24) !important;
+  box-shadow: 0 12px 28px rgba(0, 122, 255, 0.20) !important;
+}
+
+/* Focus Panel white glass */
+.room-page.game-focus-mode .chat-card,
+.room-page.game-focus-mode:fullscreen .chat-card,
+.room-page.game-focus-mode:-webkit-full-screen .chat-card {
+  color: #101828 !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.82) !important;
+  box-shadow:
+    0 24px 90px rgba(31, 41, 55, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+}
+
+.room-page.game-focus-mode .chat-header h2,
+.room-page.game-focus-mode .chat-bubble strong,
+.room-page.game-focus-mode .voice-user-info span {
+  color: #101828 !important;
+}
+
+.room-page.game-focus-mode .chat-header p,
+.room-page.game-focus-mode .focus-card-head span,
+.room-page.game-focus-mode .focus-card-title-row span,
+.room-page.game-focus-mode .focus-chat-title span,
+.room-page.game-focus-mode .voice-user-info small,
+.room-page.game-focus-mode .chat-bubble small {
+  color: #667085 !important;
+}
+
+.room-page.game-focus-mode .chat-header button,
+.room-page.game-focus-mode .focus-voice-card,
+.room-page.game-focus-mode .focus-channel-item,
+.room-page.game-focus-mode .focus-empty-user,
+.room-page.game-focus-mode .focus-voice-user,
+.room-page.game-focus-mode .chat-bubble,
+.room-page.game-focus-mode .chat-input input {
+  color: #344054 !important;
+  background: rgba(255, 255, 255, 0.68) !important;
+  border: 1px solid rgba(148, 163, 184, 0.18) !important;
+  box-shadow:
+    0 12px 34px rgba(31, 41, 55, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86) !important;
+}
+
+.room-page.game-focus-mode .focus-voice-card {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(0, 122, 255, 0.08), transparent 36%),
+    rgba(255, 255, 255, 0.66) !important;
+}
+
+.room-page.game-focus-mode .focus-side-title {
+  color: #667085 !important;
+}
+
+.room-page.game-focus-mode .focus-count-pill,
+.room-page.game-focus-mode .focus-channel-item strong {
+  color: var(--voxyn-blue) !important;
+  background: rgba(0, 122, 255, 0.10) !important;
+  border: 1px solid rgba(0, 122, 255, 0.14) !important;
+}
+
+.room-page.game-focus-mode .focus-channel-item.active {
+  color: white !important;
+  background: linear-gradient(135deg, #60a5fa, #007aff) !important;
+  border-color: rgba(0, 122, 255, 0.24) !important;
+  box-shadow: 0 14px 30px rgba(0, 122, 255, 0.20) !important;
+}
+
+.room-page.game-focus-mode .focus-channel-item.active strong {
+  color: #007aff !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+}
+
+.room-page.game-focus-mode .connected-users-card,
+.room-page.game-focus-mode .focus-chat-title {
+  border-top-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+.room-page.game-focus-mode .chat-message.system .chat-bubble {
+  background: rgba(0, 122, 255, 0.08) !important;
+  border-color: rgba(0, 122, 255, 0.14) !important;
+}
+
+.room-page.game-focus-mode .chat-bubble p,
+.room-page.game-focus-mode .chat-bubble strong {
+  color: #101828 !important;
+}
+
+.room-page.game-focus-mode .chat-input input {
+  outline: none !important;
+}
+
+.room-page.game-focus-mode .chat-input input::placeholder {
+  color: #98a2b3 !important;
+}
+
+.room-page.game-focus-mode .focus-leave-mini-btn {
+  color: var(--voxyn-red) !important;
+  background: rgba(255, 59, 48, 0.08) !important;
+  border: 1px solid rgba(255, 59, 48, 0.18) !important;
+  box-shadow: 0 12px 30px rgba(255, 59, 48, 0.10) !important;
+}
+
+.room-page.game-focus-mode .focus-leave-mini-btn.active:hover {
+  color: white !important;
+  background: var(--voxyn-red) !important;
+}
+
+/* Half-screen / stacked Stage 2 should stay white too */
+@media (max-width: 1350px) {
+  .room-page.game-focus-mode .chat-card {
+    color: #101828 !important;
+    background: rgba(255, 255, 255, 0.72) !important;
+    border: 1px solid rgba(255, 255, 255, 0.82) !important;
+    box-shadow:
+      0 24px 90px rgba(31, 41, 55, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+  }
+
+  .room-page.game-focus-mode .game-area {
+    background:
+      radial-gradient(circle at 16% 14%, rgba(0, 122, 255, 0.16), transparent 34%),
+      radial-gradient(circle at 88% 12%, rgba(175, 82, 222, 0.12), transparent 32%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.52)) !important;
+  }
+}
+
+
+
+/* =========================================================
+   SECTION 11.12: Voice Avatar Visibility Fix
+   Purpose:
+   - Keep the local user's avatar visible inside Voice Channels
+   - Restore readable white liquid-glass rows after the white theme override
+========================================================= */
+.voice-users-list {
+  display: grid !important;
+  gap: 8px !important;
+  margin: 8px 0 12px 30px !important;
+}
+
+.voice-user-row,
+.focus-voice-user,
+.room-page.game-focus-mode .focus-voice-user {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border: 1px solid rgba(148, 163, 184, 0.20) !important;
+  box-shadow:
+    0 10px 28px rgba(31, 41, 55, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+}
+
+.voice-user-avatar,
+.room-page.game-focus-mode .voice-user-avatar {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #60a5fa 0%, #007aff 52%, #7c3aed 100%) !important;
+  border: 2px solid rgba(255, 255, 255, 0.92) !important;
+  box-shadow: 0 12px 28px rgba(0, 122, 255, 0.18) !important;
+  flex: 0 0 auto;
+}
+
+.voice-user-avatar-img {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+  object-fit: cover !important;
+}
+
+.voice-user-info span,
+.room-page.game-focus-mode .voice-user-info span {
+  color: #101828 !important;
+}
+
+.voice-user-info small,
+.room-page.game-focus-mode .voice-user-info small {
+  color: #667085 !important;
+}
+
+.focus-speaking-bars span {
+  background: rgba(0, 122, 255, 0.38) !important;
+}
+
+.voice-user-avatar.is-speaking,
+.room-page.game-focus-mode .voice-user-avatar.is-speaking {
+  border-color: rgba(52, 199, 89, 0.95) !important;
+  box-shadow:
+    0 0 0 3px rgba(52, 199, 89, 0.18),
+    0 0 20px rgba(52, 199, 89, 0.35) !important;
+}
+
+.voice-user-avatar.is-muted,
+.voice-user-avatar.is-deafened,
+.room-page.game-focus-mode .voice-user-avatar.is-muted,
+.room-page.game-focus-mode .voice-user-avatar.is-deafened {
+  opacity: 0.62 !important;
+  filter: grayscale(0.25) !important;
 }
 
 </style>

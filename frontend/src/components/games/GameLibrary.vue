@@ -237,27 +237,33 @@ function launchGameFromCard(payload) {
 
 <style scoped>
 /* =========================================================
-   SECTION 1: Library Shell
-   Purpose:
-   - Main Game Library container
-   - Keep content scroll-safe inside Stage 2
+   SECTION 1: Library Shell - White Liquid Glass
+   Notes:
+   - Style-only change
+   - Game data / launch behavior unchanged
 ========================================================= */
 .game-library {
   width: 100%;
   min-height: 100%;
   padding: 36px 32px 98px;
-  color: #e5edff;
+  color: #0f172a;
   text-align: left;
   position: relative;
   z-index: 2;
   box-sizing: border-box;
+  overflow: visible;
+
+  border-radius: 30px;
+  background:
+    radial-gradient(circle at 18% 8%, rgba(96, 165, 250, 0.18), transparent 30%),
+    radial-gradient(circle at 82% 12%, rgba(168, 85, 247, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(244, 248, 255, 0.72));
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
 }
 
 /* =========================================================
    SECTION 2: Library Header
-   Purpose:
-   - Game Library title area
-   - Icon + heading + helper text
 ========================================================= */
 .library-header {
   display: flex;
@@ -274,13 +280,15 @@ function launchGameFromCard(payload) {
   display: grid;
   place-items: center;
 
-  border-radius: 22px;
-  color: #bfdbfe;
+  border-radius: 24px;
+  color: #ffffff;
   font-size: 32px;
   font-weight: 950;
 
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
-  box-shadow: 0 22px 54px rgba(37, 99, 235, 0.3);
+  background: linear-gradient(135deg, #0a84ff, #4f46e5);
+  box-shadow:
+    0 20px 48px rgba(37, 99, 235, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .library-copy {
@@ -289,7 +297,7 @@ function launchGameFromCard(payload) {
 
 .library-header h2 {
   margin: 0 0 6px;
-  color: white;
+  color: #101828;
   font-size: 36px;
   font-weight: 950;
   letter-spacing: -0.05em;
@@ -297,22 +305,19 @@ function launchGameFromCard(payload) {
 
 .library-header p {
   margin: 0 0 7px;
-  color: #c7d2fe;
+  color: #667085;
   font-size: 15px;
   font-weight: 750;
 }
 
 .library-header span {
-  color: #60a5fa;
+  color: #0a84ff;
   font-size: 13px;
   font-weight: 850;
 }
 
 /* =========================================================
    SECTION 3: Filter / Search Tools
-   Purpose:
-   - Category chips
-   - Search input
 ========================================================= */
 .library-tools {
   display: flex;
@@ -333,11 +338,16 @@ function launchGameFromCard(payload) {
   min-height: 42px;
   padding: 0 15px;
 
-  border-radius: 13px;
-  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 15px;
+  border: 1px solid rgba(15, 23, 42, 0.07);
 
-  background: rgba(15, 23, 42, 0.6);
-  color: #dbeafe;
+  background: rgba(255, 255, 255, 0.62);
+  color: #344054;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
 
   font-family: inherit;
   font-size: 13px;
@@ -348,8 +358,10 @@ function launchGameFromCard(payload) {
 }
 
 .filter-chip.active {
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
-  border-color: rgba(96, 165, 250, 0.76);
+  background: linear-gradient(135deg, #0a84ff, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.26);
+  color: #ffffff;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.18);
 }
 
 .search-box {
@@ -362,10 +374,15 @@ function launchGameFromCard(payload) {
   align-items: center;
   gap: 8px;
 
-  border-radius: 14px;
-  background: rgba(2, 6, 23, 0.46);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  color: #93c5fd;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(15, 23, 42, 0.07);
+  color: #667085;
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
 
   box-sizing: border-box;
 }
@@ -377,7 +394,7 @@ function launchGameFromCard(payload) {
   border: none;
   outline: none;
   background: transparent;
-  color: #dbeafe;
+  color: #101828;
 
   font: inherit;
   font-size: 13px;
@@ -385,15 +402,11 @@ function launchGameFromCard(payload) {
 }
 
 .search-box input::placeholder {
-  color: #64748b;
+  color: #98a2b3;
 }
 
 /* =========================================================
    SECTION 4: Game Grid
-   Purpose:
-   - Full screen: 4 cards per row
-   - Medium screen: 2 cards per row
-   - Half / narrow screen: 1 card per row
 ========================================================= */
 .game-grid {
   width: 100%;
@@ -415,17 +428,13 @@ function launchGameFromCard(payload) {
   align-items: center;
   gap: 8px;
 
-  color: #94a3b8;
+  color: #667085;
   font-size: 13px;
   font-weight: 850;
 }
 
 /* =========================================================
    SECTION 6: Compact Half-Screen Game Launcher
-   Purpose:
-   - Full screen uses card grid
-   - Half screen uses compact launcher rows
-   - Prevent ugly squeezed vertical card layout
 ========================================================= */
 .compact-game-list {
   display: none;
@@ -442,7 +451,8 @@ function launchGameFromCard(payload) {
   }
 
   .game-library {
-    padding: 26px 18px 96px;
+    min-height: auto;
+    padding: 26px 18px 120px;
   }
 
   .library-header {
@@ -455,7 +465,7 @@ function launchGameFromCard(payload) {
     width: 52px;
     height: 52px;
     flex: 0 0 52px;
-    border-radius: 17px;
+    border-radius: 18px;
     font-size: 23px;
   }
 
@@ -506,18 +516,22 @@ function launchGameFromCard(payload) {
     gap: 12px;
     align-items: center;
 
-    border-radius: 20px;
-    border: 1px solid rgba(148, 163, 184, 0.22);
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.82);
 
     background:
-      linear-gradient(180deg, rgba(15, 23, 42, 0.84), rgba(15, 23, 42, 0.48)),
-      rgba(2, 6, 23, 0.42);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.58)),
+      rgba(255, 255, 255, 0.64);
 
-    box-shadow: 0 18px 46px rgba(2, 6, 23, 0.26);
+    box-shadow:
+      0 18px 44px rgba(30, 64, 175, 0.10),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
   }
 
   .compact-game-row.ready {
-    border-color: rgba(96, 165, 250, 0.38);
+    border-color: rgba(59, 130, 246, 0.28);
   }
 
   .compact-game-art {
@@ -527,18 +541,19 @@ function launchGameFromCard(payload) {
     display: grid;
     place-items: center;
 
-    border-radius: 18px;
+    border-radius: 20px;
 
     background:
-      radial-gradient(circle at 35% 20%, rgba(96, 165, 250, 0.44), transparent 32%),
-      radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.34), transparent 34%),
-      linear-gradient(135deg, #020617, #172554);
+      radial-gradient(circle at 35% 20%, rgba(96, 165, 250, 0.28), transparent 32%),
+      radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.20), transparent 34%),
+      linear-gradient(135deg, rgba(255,255,255,0.92), rgba(232,240,255,0.74));
 
-    border: 1px solid rgba(96, 165, 250, 0.22);
-    color: #bfdbfe;
+    border: 1px solid rgba(255, 255, 255, 0.82);
+    color: #2563eb;
 
     font-size: 16px;
     font-weight: 950;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.88);
   }
 
   .compact-game-info {
@@ -547,7 +562,7 @@ function launchGameFromCard(payload) {
 
   .compact-game-info p {
     margin: 0 0 4px;
-    color: #60a5fa;
+    color: #2563eb;
     font-size: 11px;
     font-weight: 950;
     text-transform: uppercase;
@@ -556,7 +571,7 @@ function launchGameFromCard(payload) {
 
   .compact-game-info h3 {
     margin: 0 0 4px;
-    color: white;
+    color: #101828;
     font-size: 20px;
     font-weight: 950;
     letter-spacing: -0.04em;
@@ -569,7 +584,7 @@ function launchGameFromCard(payload) {
     display: block;
     margin-bottom: 5px;
 
-    color: #94a3b8;
+    color: #667085;
     font-size: 12px;
     font-weight: 750;
 
@@ -579,7 +594,7 @@ function launchGameFromCard(payload) {
   }
 
   .compact-game-info span {
-    color: #64748b;
+    color: #98a2b3;
     font-size: 11px;
     font-weight: 850;
   }
@@ -596,11 +611,12 @@ function launchGameFromCard(payload) {
     min-height: 38px;
     padding: 0 12px;
 
-    border: none;
-    border-radius: 12px;
+    border: 1px solid rgba(37, 99, 235, 0.16);
+    border-radius: 13px;
 
-    color: white;
-    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: #ffffff;
+    background: linear-gradient(135deg, #0a84ff, #3b82f6);
+    box-shadow: 0 12px 24px rgba(37, 99, 235, 0.16);
 
     font-family: inherit;
     font-size: 13px;
@@ -609,8 +625,17 @@ function launchGameFromCard(payload) {
     cursor: pointer;
   }
 
+  .compact-mode-btn.ai,
+  .compact-mode-btn.single,
+  .compact-mode-btn.player {
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.10);
+    border-color: rgba(37, 99, 235, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.84);
+  }
+
   .compact-mode-btn.multiplayer {
-    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    background: linear-gradient(135deg, #0a84ff, #4f46e5);
   }
 
   .scroll-hint {
@@ -618,17 +643,12 @@ function launchGameFromCard(payload) {
   }
 }
 
-
 /* =========================================================
    SECTION 7: Responsive - Half Screen / Narrow Screen
-   Purpose:
-   - Prevent the broken squeezed card layout
-   - Switch to one card per row
-   - Make filter row horizontally scrollable
 ========================================================= */
 @media (max-width: 760px) {
   .game-library {
-    padding: 28px 18px 96px;
+    padding: 28px 18px 120px;
   }
 
   .library-header {
@@ -683,12 +703,10 @@ function launchGameFromCard(payload) {
 
 /* =========================================================
    SECTION 8: Responsive - Very Narrow
-   Purpose:
-   - Extra safety for extremely small split-screen width
 ========================================================= */
 @media (max-width: 480px) {
   .game-library {
-    padding: 22px 14px 96px;
+    padding: 22px 14px 120px;
   }
 
   .library-header {
@@ -703,25 +721,4 @@ function launchGameFromCard(payload) {
     min-height: 38px;
   }
 }
-/* =========================================================
-   SECTION 9: Stage 2 Scroll Safety
-   Purpose:
-   - Make GameLibrary content scroll correctly inside RoomView game-area
-   - Prevent content from being clipped in half-screen mode
-========================================================= */
-.game-library {
-  overflow: visible;
-}
-
-@media (max-width: 900px) {
-  .game-library {
-    min-height: auto;
-    padding-bottom: 120px;
-  }
-
-  .compact-game-list {
-    padding-bottom: 24px;
-  }
-}
-
 </style>

@@ -2172,4 +2172,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`VOXYN backend running on http://localhost:${PORT}`);
 });
-
