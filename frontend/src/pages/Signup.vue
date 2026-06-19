@@ -4,6 +4,7 @@
 ========================================================= */
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
+import SliderVerifyModal from "../components/SliderVerifyModal.vue"
 
 /* =========================================================
    SECTION 2: Router / Form State
@@ -26,6 +27,7 @@ const verifyLoading = ref(false)
 const errorMessage = ref("")
 const successMessage = ref("")
 const signupStep = ref("form")
+const showSliderVerify = ref(false)
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").trim()
 
@@ -115,16 +117,38 @@ async function readApiMessage(response) {
   }
 }
 /* =========================================================
-   SECTION 6: Request Signup Code
+   SECTION 6: Slider Verification Gate
    Purpose:
    - Validate email/password locally
-   - Ask Express backend to send a 6-digit code
-   - Backend checks existing account and sends SMTP email
+   - Open human verification before SMTP email is sent
+   - Do not send OTP until SliderVerifyModal emits verified
 ========================================================= */
-async function createAccount() {
+function createAccount() {
   clearMessages()
 
   if (!validateSignupForm()) return
+
+  showSliderVerify.value = true
+}
+
+function closeSliderVerify() {
+  showSliderVerify.value = false
+}
+
+async function handleSliderVerified() {
+  showSliderVerify.value = false
+  await requestSignupCode()
+}
+
+/* =========================================================
+   SECTION 6.1: Request Signup Code
+   Purpose:
+   - Ask Express backend to send a 6-digit code
+   - Backend checks existing account and sends SMTP email
+   - Only runs after slider verification passes
+========================================================= */
+async function requestSignupCode() {
+  clearMessages()
 
   loading.value = true
 
@@ -497,7 +521,16 @@ async function resendVerificationCode() {
     </section>
 
     <!-- =========================================================
-         SECTION 4: Footer
+         SECTION 4: Slider Verification Modal
+    ========================================================== -->
+    <SliderVerifyModal
+      v-if="showSliderVerify"
+      @close="closeSliderVerify"
+      @verified="handleSliderVerified"
+    />
+
+    <!-- =========================================================
+         SECTION 5: Footer
     ========================================================== -->
     <footer class="auth-footer">
       <span>⌂</span>
@@ -965,7 +998,7 @@ async function resendVerificationCode() {
 }
 
 /* =========================================================
-   SECTION 4: Footer
+   SECTION 5: Footer
 ========================================================= */
 .auth-footer {
   position: relative;
@@ -988,7 +1021,7 @@ async function resendVerificationCode() {
 }
 
 /* =========================================================
-   SECTION 5: Responsive
+   SECTION 6: Responsive
 ========================================================= */
 @media (max-width: 640px) {
   .signup-page {

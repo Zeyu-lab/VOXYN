@@ -277,3 +277,17 @@ Result:
 
 * v0.801 confirms that VOXYN's custom OTP signup flow works for both local testing and temporary external tester registration through a Cloudflare Quick Tunnel.
 * The auth flow is now stable enough for approved friends/testers to register using their own email and receive a real 6-digit verification code.
+
+
+v0.82
+
+- Added a slider-based security verification step before sending signup email OTP codes.
+- Updated the Create Account flow so clicking the button opens a Security Check modal instead of immediately sending an email.
+- Built a drag-to-match square challenge where the user must move the square into the correct target slot before verification succeeds.
+- Added an internal 5-second verification limit, while keeping the timer hidden from the UI for a cleaner user experience.
+- Prevented email verification requests from being sent unless the slider challenge is completed successfully.
+- Fixed square and target-slot alignment by placing both elements on the same vertical center line.
+- Improved drag responsiveness by removing delayed transform transitions and using pointer movement with requestAnimationFrame.
+- Refined the slider thumb UI into a polished glass-style control and removed default browser button styling.
+- Kept the verification modal consistent with Voxyn’s white Apple-style liquid-glass visual direction.
+- Improved the signup anti-abuse flow to reduce accidental or automated email OTP spam during external testing.
