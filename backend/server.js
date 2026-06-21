@@ -1033,6 +1033,7 @@ function emitGameSessionUpdate(roomCode, gameId) {
   const gameRoom = getGameSocketRoom(roomCode, gameId);
 
   io.to(gameRoom).emit("game:session-update", serializeGameSession(session));
+  emitActiveGameRoomsUpdate(gameId);
 }
 
 function removeSocketFromAllGameSessions(roomCode, socketId) {
@@ -1052,6 +1053,7 @@ function removeSocketFromAllGameSessions(roomCode, socketId) {
 
     if (!hasPlayers && !hasSpectators) {
       room.gameSessions.delete(gameId);
+      emitActiveGameRoomsUpdate(gameId);
       continue;
     }
 
@@ -1067,6 +1069,55 @@ function getRoomGameSessions(roomCode) {
   }
 
   return Array.from(room.gameSessions.values()).map(serializeGameSession);
+}
+
+function getActiveGameRooms(gameId) {
+  const targetGameId = String(gameId || "").trim();
+
+  if (!getGameConfig(targetGameId)) {
+    return [];
+  }
+
+  const activeGameRooms = [];
+
+  for (const [roomCode, room] of rooms.entries()) {
+    if (!room?.gameSessions?.has(targetGameId)) continue;
+
+    const session = room.gameSessions.get(targetGameId);
+    const serializedSession = serializeGameSession(session);
+
+    if (!serializedSession) continue;
+
+    const hasPlayers = session.playerSlots.some((slot) => slot.socketId);
+    const hasSpectators = session.spectators.size > 0;
+
+    if (!hasPlayers && !hasSpectators) continue;
+
+    activeGameRooms.push({
+      ...serializedSession,
+      roomCode,
+      roomUserCount: room.users?.size || 0,
+      openSlotCount: Math.max(
+        serializedSession.maxPlayers - serializedSession.playerCount,
+        0
+      ),
+    });
+  }
+
+  return activeGameRooms.sort((a, b) => {
+    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+  });
+}
+
+function emitActiveGameRoomsUpdate(gameId) {
+  const targetGameId = String(gameId || "").trim();
+
+  if (!targetGameId) return;
+
+  io.emit("game:active-rooms-update", {
+    gameId: targetGameId,
+    rooms: getActiveGameRooms(targetGameId),
+  });
 }
 
 /* =========================================================
@@ -1513,6 +1564,47 @@ io.on("connection", (socket) => {
         - Manage player slots and spectators
         - Sync live game state for spectator mode
       ===================================================== */
+      socket.on("game:get-active-rooms", (payload, callback) => {
+        try {
+          const gameId = String(payload?.gameId || "").trim();
+
+          if (!getGameConfig(gameId)) {
+            if (callback) {
+              callback({
+                ok: false,
+                error: "Invalid game id.",
+              });
+            }
+
+            return;
+          }
+
+          const activeGameRooms = getActiveGameRooms(gameId);
+
+          if (callback) {
+            callback({
+              ok: true,
+              gameId,
+              rooms: activeGameRooms,
+            });
+          } else {
+            socket.emit("game:active-rooms", {
+              gameId,
+              rooms: activeGameRooms,
+            });
+          }
+        } catch (error) {
+          console.error("game:get-active-rooms error:", error);
+
+          if (callback) {
+            callback({
+              ok: false,
+              error: "Failed to get active game rooms.",
+            });
+          }
+        }
+      });
+
       socket.on("game:join-session", (payload, callback) => {
         try {
           const roomCode = String(
@@ -1734,6 +1826,7 @@ io.on("connection", (socket) => {
 
           if (!hasPlayers && !hasSpectators) {
             room.gameSessions.delete(gameId);
+            emitActiveGameRoomsUpdate(gameId);
           } else {
             emitGameSessionUpdate(roomCode, gameId);
           }
@@ -2172,4 +2265,3 @@ io.on("connection", (socket) => {
 server.listen(PORT, () => {
   console.log(`VOXYN backend running on http://localhost:${PORT}`);
 });
-

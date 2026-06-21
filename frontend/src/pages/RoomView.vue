@@ -1052,6 +1052,10 @@ onMounted(async () => {
   document.addEventListener("keydown", handleStageOneFullscreenShortcut)
 
   await loadRoomPage()
+
+  if (route.query?.game) {
+    enterStageTwoGame()
+  }
 })
 
 onBeforeUnmount(() => {

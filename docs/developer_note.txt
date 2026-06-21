@@ -291,3 +291,20 @@ v0.82
 - Refined the slider thumb UI into a polished glass-style control and removed default browser button styling.
 - Kept the verification modal consistent with Voxyn’s white Apple-style liquid-glass visual direction.
 - Improved the signup anti-abuse flow to reduce accidental or automated email OTP spam during external testing.
+
+
+v0.9
+- Completed the first full GameStage interaction upgrade for VOXYN Stage 2.
+- Added Game Room Watcher entry points to game cards, allowing users to view active rooms for each game.
+- Designed and connected the Live Rooms drawer for active game sessions, including players, spectators, room status, Watch, and Join Game actions.
+- Added backend support for scanning active game sessions across rooms by gameId.
+- Improved RoomView deep-link handling so users can enter a target room and open a selected game in Stage 2.
+- Reworked Tic Tac Toe into a role-based multiplayer room experience.
+- Added Tic Tac Toe role control with Watch, Player 1, Player 2, host state, spectators, and open-slot joining.
+- Updated Tic Tac Toe so spectators cannot play, and only the correct player can make moves during their turn.
+- Reworked Falling Blocks into a Runner / Watcher model instead of generic Player / Spectator labels.
+- Added Falling Blocks top role controls, Runner slot, Watch mode, watcher list, and room info display.
+- Locked Falling Blocks gameplay controls so watchers can only view the live run and cannot mutate the board state.
+- Adjusted Falling Blocks layout, proportions, and section structure to better fit VOXYN Stage 2 without wasting too much space.
+- Continued polishing the Apple-style white liquid-glass UI direction across the game experience.
+- Prepared the Stage 2 game system for more multiplayer games before VOXYN v1.0.

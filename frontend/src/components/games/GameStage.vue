@@ -6,7 +6,7 @@
    - Load Game Library
    - Load playable game modules
 ========================================================= */
-import { computed, ref } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import GameLibrary from "./GameLibrary.vue"
 import TicTacToe from "./TicTacToe.vue"
 import FallingBlocks from "./FallingBlocks.vue"
@@ -43,6 +43,13 @@ const emit = defineEmits(["enter-stage-two"])
    SECTION 3: Stage Game State
 ========================================================= */
 const selectedGame = ref(null)
+const selectedRoomsGame = ref(null)
+const isRoomsDrawerOpen = ref(false)
+const activeRooms = ref([])
+const isLoadingRooms = ref(false)
+const roomsError = ref("")
+
+let boundRoomsSocket = null
 
 /* =========================================================
    SECTION 4: Game Component Registry
@@ -59,6 +66,23 @@ const gameComponentRegistry = {
   // "click-battle": ClickBattle
   // "game-2048": Game2048
 }
+
+const gameMetaRegistry = {
+  "tic-tac-toe": {
+    gameTitle: "Tic Tac Toe",
+    gameNumber: "Game 1",
+    players: "1–2 players",
+    ready: true
+  },
+  "falling-blocks": {
+    gameTitle: "Falling Blocks",
+    gameNumber: "Game 2",
+    players: "1 player",
+    ready: false
+  }
+}
+
+let hasAppliedUrlGameLaunch = false
 
 /* =========================================================
    SECTION 5: Active Game Computeds
@@ -80,16 +104,251 @@ const isPlayableGame = computed(() => {
   return Boolean(activeGameComponent.value)
 })
 
+const roomsDrawerTitle = computed(() => {
+  return selectedRoomsGame.value?.gameTitle
+    ? `${selectedRoomsGame.value.gameTitle} Rooms`
+    : "Live Rooms"
+})
+
+const liveRoomCount = computed(() => {
+  return activeRooms.value.length
+})
+
+const selectedRoomsGameId = computed(() => {
+  return selectedRoomsGame.value?.gameId || ""
+})
+
+const hasActiveRooms = computed(() => {
+  return activeRooms.value.length > 0
+})
+
 /* =========================================================
-   SECTION 6: Actions
+   SECTION 6: URL Game Launch Helpers
+   Purpose:
+   - Let Live Rooms navigate to /room/:code?game=...&role=...
+   - Once Stage 2 opens, auto-load the requested game screen
+========================================================= */
+function getGameMeta(gameId) {
+  return gameMetaRegistry[gameId] || {
+    gameTitle: gameId || "Game",
+    gameNumber: "Game",
+    players: "Players",
+    ready: false
+  }
+}
+
+function applyUrlGameLaunch() {
+  if (hasAppliedUrlGameLaunch) return
+  if (!props.isStageTwo) return
+
+  const params = new URLSearchParams(window.location.search)
+  const gameId = String(params.get("game") || "").trim()
+  const role = String(params.get("role") || "spectator")
+    .trim()
+    .toLowerCase()
+
+  if (!gameId) return
+
+  const gameMeta = getGameMeta(gameId)
+  const defaultRole = role === "player" ? "player" : "spectator"
+
+  selectedGame.value = {
+    gameId,
+    ...gameMeta,
+    mode: defaultRole === "player" ? "multiplayer" : "spectator",
+    modeLabel: defaultRole === "player" ? "Multiplayer" : "Watch",
+    defaultRole,
+    watchRoomCode: props.roomCode
+  }
+
+  hasAppliedUrlGameLaunch = true
+}
+
+/* =========================================================
+   SECTION 7: Live Room Helpers
+========================================================= */
+function normalizeRooms(payload) {
+  if (!payload) return []
+
+  const rooms = Array.isArray(payload.rooms)
+    ? payload.rooms
+    : Array.isArray(payload)
+      ? payload
+      : []
+
+  return rooms.map((room) => {
+    const maxPlayers = Number(room?.maxPlayers || 0)
+    const playerCount = Number(room?.playerCount || 0)
+
+    return {
+      ...room,
+      openSlotCount: Number.isFinite(Number(room?.openSlotCount))
+        ? Number(room.openSlotCount)
+        : Math.max(maxPlayers - playerCount, 0)
+    }
+  })
+}
+
+function getPlayerSlot(room, index) {
+  return room?.playerSlots?.[index] || null
+}
+
+function getPlayerInitial(slot, fallback = "?") {
+  return slot?.player?.initial || fallback
+}
+
+function getPlayerName(slot, fallback = "Open Slot") {
+  return slot?.player?.username || fallback
+}
+
+function getSpectatorLabel(room) {
+  const count = Number(room?.spectatorCount || 0)
+  return count === 1 ? "1 spectator" : `${count} spectators`
+}
+
+function getOpenSlotCount(room) {
+  return Number(room?.openSlotCount || 0)
+}
+
+function getRoomLabel(room, index) {
+  return room?.roomCode ? `Room ${room.roomCode}` : `Room ${index + 1}`
+}
+
+function bindRoomsSocket(nextSocket) {
+  if (boundRoomsSocket && boundRoomsSocket !== nextSocket) {
+    boundRoomsSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+  }
+
+  if (!nextSocket) {
+    boundRoomsSocket = null
+    return
+  }
+
+  nextSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+  nextSocket.on("game:active-rooms-update", handleActiveRoomsUpdate)
+  boundRoomsSocket = nextSocket
+}
+
+function handleActiveRoomsUpdate(payload) {
+  if (!selectedRoomsGameId.value) return
+  if (payload?.gameId !== selectedRoomsGameId.value) return
+
+  activeRooms.value = normalizeRooms(payload)
+}
+
+function fetchActiveRooms(gameId = selectedRoomsGameId.value) {
+  if (!gameId) return
+
+  const currentSocket = props.socket
+
+  roomsError.value = ""
+
+  if (!currentSocket) {
+    activeRooms.value = []
+    roomsError.value = "Socket is not connected yet."
+    return
+  }
+
+  isLoadingRooms.value = true
+
+  currentSocket.emit(
+    "game:get-active-rooms",
+    { gameId },
+    (response) => {
+      isLoadingRooms.value = false
+
+      if (!response?.ok) {
+        activeRooms.value = []
+        roomsError.value = response?.error || "Failed to load active rooms."
+        return
+      }
+
+      activeRooms.value = normalizeRooms(response)
+    }
+  )
+}
+
+function openGameRooms(payload) {
+  selectedRoomsGame.value = payload
+  isRoomsDrawerOpen.value = true
+  activeRooms.value = []
+  roomsError.value = ""
+  fetchActiveRooms(payload?.gameId)
+}
+
+function closeGameRooms() {
+  isRoomsDrawerOpen.value = false
+}
+
+function refreshGameRooms() {
+  fetchActiveRooms()
+}
+
+function launchRoomFromDrawer(room, role = "spectator") {
+  if (!selectedRoomsGame.value) return
+
+  const nextGame = {
+    ...selectedRoomsGame.value,
+    mode: role === "player" ? "multiplayer" : "spectator",
+    modeLabel: role === "player" ? "Multiplayer" : "Watch",
+    defaultRole: role,
+    watchRoomCode: room?.roomCode || props.roomCode
+  }
+
+  if (!room?.roomCode || room.roomCode === props.roomCode) {
+    selectedGame.value = nextGame
+    isRoomsDrawerOpen.value = false
+    return
+  }
+
+  const targetRoom = encodeURIComponent(room.roomCode)
+  const targetGame = encodeURIComponent(selectedRoomsGame.value.gameId)
+  const targetRole = encodeURIComponent(role)
+
+  window.location.href = `/room/${targetRoom}?game=${targetGame}&role=${targetRole}`
+}
+
+function watchRoom(room) {
+  launchRoomFromDrawer(room, "spectator")
+}
+
+function joinOpenRoom(room) {
+  launchRoomFromDrawer(room, "player")
+}
+
+/* =========================================================
+   SECTION 8: Actions
 ========================================================= */
 function handleLaunchGame(payload) {
   selectedGame.value = payload
+  isRoomsDrawerOpen.value = false
 }
 
 function backToLibrary() {
   selectedGame.value = null
 }
+
+watch(
+  () => props.isStageTwo,
+  () => {
+    applyUrlGameLaunch()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.socket,
+  (nextSocket) => {
+    bindRoomsSocket(nextSocket)
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  if (!boundRoomsSocket) return
+  boundRoomsSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+  boundRoomsSocket = null
+})
 </script>
 
 
@@ -114,15 +373,159 @@ function backToLibrary() {
       </button>
     </div>
 
-    <GameLibrary
-        v-else-if="!selectedGame"
+    <div
+      v-else-if="!selectedGame"
+      class="library-live-shell"
+      :class="{ 'rooms-open': isRoomsDrawerOpen }"
+    >
+      <GameLibrary
         @launch-game="handleLaunchGame"
-    />
+        @open-game-rooms="openGameRooms"
+      />
+
+      <button
+        v-if="selectedRoomsGame"
+        type="button"
+        class="live-edge-tab"
+        :class="{ open: isRoomsDrawerOpen }"
+        @click="isRoomsDrawerOpen ? closeGameRooms() : openGameRooms(selectedRoomsGame)"
+      >
+        <span>👁</span>
+        <strong>{{ liveRoomCount }}</strong>
+        <em>Live</em>
+      </button>
+
+      <aside
+        v-if="isRoomsDrawerOpen"
+        class="live-rooms-drawer"
+      >
+        <header class="live-rooms-header">
+          <div>
+            <p>{{ roomsDrawerTitle }}</p>
+            <span>Live matches you can watch or join</span>
+          </div>
+
+          <div class="drawer-actions">
+            <button
+              type="button"
+              class="drawer-icon-btn"
+              :disabled="isLoadingRooms"
+              @click="refreshGameRooms"
+            >
+              ↻
+            </button>
+
+            <button
+              type="button"
+              class="drawer-icon-btn"
+              @click="closeGameRooms"
+            >
+              ×
+            </button>
+          </div>
+        </header>
+
+        <div
+          v-if="isLoadingRooms"
+          class="rooms-empty-state"
+        >
+          <strong>Loading rooms...</strong>
+          <small>Scanning active VOXYN game sessions.</small>
+        </div>
+
+        <div
+          v-else-if="roomsError"
+          class="rooms-empty-state warning"
+        >
+          <strong>Rooms unavailable</strong>
+          <small>{{ roomsError }}</small>
+        </div>
+
+        <div
+          v-else-if="!hasActiveRooms"
+          class="rooms-empty-state"
+        >
+          <strong>No live rooms yet</strong>
+          <small>Start this game first, then friends can watch from here.</small>
+        </div>
+
+        <div
+          v-else
+          class="live-room-list"
+        >
+          <article
+            v-for="(room, index) in activeRooms"
+            :key="room.id || `${room.roomCode}-${index}`"
+            class="live-room-card"
+            :class="{ joinable: getOpenSlotCount(room) > 0 }"
+          >
+            <div class="room-card-topline">
+              <span
+                class="status-pill"
+                :class="{ open: getOpenSlotCount(room) > 0 }"
+              >
+                {{ getOpenSlotCount(room) > 0 ? `${getOpenSlotCount(room)} SLOT OPEN` : 'LIVE' }}
+              </span>
+
+              <small>👁 {{ getSpectatorLabel(room) }}</small>
+            </div>
+
+            <div class="room-code-line">
+              {{ getRoomLabel(room, index) }}
+            </div>
+
+            <div class="matchup-row">
+              <div class="player-preview">
+                <div class="player-orb blue">
+                  {{ getPlayerInitial(getPlayerSlot(room, 0), 'A') }}
+                </div>
+                <span>{{ getPlayerName(getPlayerSlot(room, 0), 'Open Slot') }}</span>
+              </div>
+
+              <strong>VS</strong>
+
+              <div class="player-preview">
+                <div
+                  class="player-orb purple"
+                  :class="{ empty: !getPlayerSlot(room, 1)?.occupied }"
+                >
+                  {{ getPlayerSlot(room, 1)?.occupied ? getPlayerInitial(getPlayerSlot(room, 1), 'B') : '+' }}
+                </div>
+                <span>{{ getPlayerName(getPlayerSlot(room, 1), 'Open Slot') }}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              class="watch-room-btn"
+              @click="watchRoom(room)"
+            >
+              👁 Watch
+            </button>
+
+            <button
+              v-if="getOpenSlotCount(room) > 0"
+              type="button"
+              class="join-room-btn"
+              @click="joinOpenRoom(room)"
+            >
+              🎮 Join Game
+            </button>
+          </article>
+        </div>
+
+        <footer class="rooms-drawer-footer">
+          ⓘ Watch active matches and join when a slot opens.
+        </footer>
+      </aside>
+    </div>
 
     <component
         :is="activeGameComponent"
         v-else-if="isPlayableGame"
         :mode="selectedGameMode"
+        :default-role="selectedGame?.defaultRole || 'player'"
+        :watch-room-code="selectedGame?.watchRoomCode || props.roomCode"
         :room-code="props.roomCode"
         :user="props.user"
         :socket="props.socket"
@@ -271,4 +674,377 @@ function backToLibrary() {
   filter: brightness(1.04);
   box-shadow: 0 22px 48px rgba(37, 99, 235, 0.28);
 }
+
+/* =========================================================
+   SECTION 3: Game Room Watcher Drawer
+   Purpose:
+   - v0.83 per-card live room browser
+   - Keep GameCard clean, draw room list from GameStage
+========================================================= */
+.library-live-shell {
+  position: relative;
+  min-height: 100%;
+}
+
+.live-edge-tab {
+  position: absolute;
+  top: 128px;
+  right: 14px;
+  z-index: 12;
+
+  width: 54px;
+  min-height: 116px;
+  padding: 10px 0;
+
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  border-radius: 999px;
+  color: #2563eb;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.88), rgba(239,246,255,0.70)),
+    rgba(255, 255, 255, 0.70);
+  box-shadow:
+    0 18px 44px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.live-edge-tab:hover,
+.live-edge-tab.open {
+  transform: translateX(-2px);
+  border-color: rgba(37, 99, 235, 0.28);
+  box-shadow:
+    0 22px 52px rgba(37, 99, 235, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+.live-edge-tab span,
+.live-edge-tab strong,
+.live-edge-tab em {
+  display: block;
+  line-height: 1;
+}
+
+.live-edge-tab strong {
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.live-edge-tab em {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+
+.live-rooms-drawer {
+  position: absolute;
+  top: 44px;
+  right: 24px;
+  z-index: 20;
+
+  width: min(318px, calc(100% - 48px));
+  max-height: calc(100% - 76px);
+  padding: 18px;
+  box-sizing: border-box;
+  overflow: auto;
+
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.84);
+  background:
+    radial-gradient(circle at 18% 0%, rgba(96, 165, 250, 0.16), transparent 34%),
+    radial-gradient(circle at 90% 18%, rgba(168, 85, 247, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.88), rgba(244,248,255,0.76));
+  box-shadow:
+    0 28px 78px rgba(30, 64, 175, 0.16),
+    0 10px 28px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255,255,255,0.96);
+  backdrop-filter: blur(30px) saturate(190%);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  text-align: left;
+}
+
+.live-rooms-drawer::-webkit-scrollbar {
+  width: 8px;
+}
+
+.live-rooms-drawer::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.28);
+}
+
+.live-rooms-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.live-rooms-header p {
+  margin: 0 0 5px;
+  color: #101828;
+  font-size: 20px;
+  font-weight: 950;
+  letter-spacing: -0.04em;
+}
+
+.live-rooms-header span {
+  color: #667085;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.drawer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.drawer-icon-btn {
+  width: 34px;
+  height: 34px;
+
+  display: grid;
+  place-items: center;
+
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 999px;
+  color: #475467;
+  background: rgba(255, 255, 255, 0.70);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.90);
+
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.drawer-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rooms-empty-state {
+  padding: 24px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(59, 130, 246, 0.12);
+  background: rgba(255, 255, 255, 0.58);
+  text-align: center;
+}
+
+.rooms-empty-state strong {
+  display: block;
+  color: #101828;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.rooms-empty-state small {
+  display: block;
+  margin-top: 7px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.rooms-empty-state.warning {
+  border-color: rgba(245, 158, 11, 0.22);
+  background: rgba(255, 251, 235, 0.60);
+}
+
+.live-room-list {
+  display: grid;
+  gap: 12px;
+}
+
+.live-room-card {
+  padding: 13px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.86);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.58)),
+    rgba(255, 255, 255, 0.68);
+  box-shadow:
+    0 16px 38px rgba(30, 64, 175, 0.10),
+    inset 0 1px 0 rgba(255,255,255,0.92);
+}
+
+.live-room-card.joinable {
+  border-color: rgba(245, 158, 11, 0.30);
+}
+
+.room-card-topline,
+.matchup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.room-card-topline small {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.status-pill {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #7c3aed;
+  background: rgba(168, 85, 247, 0.12);
+  border: 1px solid rgba(168, 85, 247, 0.16);
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.status-pill.open {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.22);
+}
+
+.room-code-line {
+  margin: 10px 0 12px;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.matchup-row {
+  margin-bottom: 12px;
+}
+
+.matchup-row > strong {
+  color: #475467;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.player-preview {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.player-preview span {
+  max-width: 92px;
+  color: #344054;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-orb {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 950;
+  box-shadow:
+    0 12px 26px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255,255,255,0.88);
+}
+
+.player-orb.blue {
+  color: #2563eb;
+  background: linear-gradient(135deg, rgba(219,234,254,0.94), rgba(191,219,254,0.76));
+  border: 1px solid rgba(59, 130, 246, 0.20);
+}
+
+.player-orb.purple {
+  color: #7c3aed;
+  background: linear-gradient(135deg, rgba(243,232,255,0.94), rgba(221,214,254,0.76));
+  border: 1px solid rgba(168, 85, 247, 0.20);
+}
+
+.player-orb.empty {
+  color: #98a2b3;
+  background: rgba(255,255,255,0.62);
+  border-style: dashed;
+}
+
+.watch-room-btn,
+.join-room-btn {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.watch-room-btn {
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  color: #0a84ff;
+  background: rgba(37, 99, 235, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.86);
+}
+
+.join-room-btn {
+  margin-top: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.34);
+  color: #ffffff;
+  background: linear-gradient(135deg, #0a84ff, #4f46e5);
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.18);
+}
+
+.rooms-drawer-footer {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 15px;
+  color: #667085;
+  background: rgba(239, 246, 255, 0.72);
+  border: 1px solid rgba(59, 130, 246, 0.10);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .live-edge-tab {
+    top: auto;
+    right: 18px;
+    bottom: 18px;
+    width: auto;
+    min-height: 42px;
+    padding: 0 14px;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+  }
+
+  .live-edge-tab em {
+    writing-mode: horizontal-tb;
+  }
+
+  .live-rooms-drawer {
+    top: 18px;
+    right: 18px;
+    left: 18px;
+    width: auto;
+    max-height: calc(100% - 36px);
+  }
+}
+
 </style>

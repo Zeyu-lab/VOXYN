@@ -12,7 +12,7 @@ import GameCard from "./GameCard.vue"
    Purpose:
    - Send selected game + mode up to GameStage
 ========================================================= */
-const emit = defineEmits(["launch-game"])
+const emit = defineEmits(["launch-game", "open-game-rooms"])
 
 /* =========================================================
    SECTION 3: Game Catalog
@@ -118,8 +118,21 @@ function createLaunchPayload(game, mode) {
   return {
     gameId: game.id,
     gameTitle: game.title,
-    mode,
-    modeLabel: mode
+    gameNumber: game.number,
+    players: game.players,
+    mode: mode.toLowerCase(),
+    modeLabel: mode,
+    ready: game.ready
+  }
+}
+
+function createRoomsPayload(game) {
+  return {
+    gameId: game.id,
+    gameTitle: game.title,
+    gameNumber: game.number,
+    players: game.players,
+    ready: game.ready
   }
 }
 
@@ -129,6 +142,14 @@ function launchGame(game, mode) {
 
 function launchGameFromCard(payload) {
   emit("launch-game", payload)
+}
+
+function openGameRooms(game) {
+  emit("open-game-rooms", createRoomsPayload(game))
+}
+
+function openGameRoomsFromCard(payload) {
+  emit("open-game-rooms", payload)
 }
 </script>
 
@@ -186,6 +207,7 @@ function launchGameFromCard(payload) {
             :key="game.id"
             :game="game"
             @launch-game="launchGameFromCard"
+            @open-game-rooms="openGameRoomsFromCard"
         />
         </div>
 
@@ -228,6 +250,14 @@ function launchGameFromCard(payload) {
             >
                 {{ mode === "AI" ? "🤖" : "👥" }}
                 {{ mode }}
+            </button>
+
+            <button
+                type="button"
+                class="compact-mode-btn rooms"
+                @click="openGameRooms(game)"
+            >
+                👁 Rooms
             </button>
             </div>
         </article>
@@ -636,6 +666,17 @@ function launchGameFromCard(payload) {
 
   .compact-mode-btn.multiplayer {
     background: linear-gradient(135deg, #0a84ff, #4f46e5);
+  }
+
+  .compact-mode-btn.rooms {
+    color: #2563eb;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.88), rgba(239,246,255,0.74)),
+      rgba(255, 255, 255, 0.68);
+    border-color: rgba(37, 99, 235, 0.14);
+    box-shadow:
+      0 10px 20px rgba(37, 99, 235, 0.08),
+      inset 0 1px 0 rgba(255,255,255,0.88);
   }
 
   .scroll-hint {

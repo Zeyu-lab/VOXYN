@@ -22,6 +22,14 @@ const props = defineProps({
     type: String,
     default: ""
   },
+  watchRoomCode: {
+    type: String,
+    default: ""
+  },
+  defaultRole: {
+    type: String,
+    default: "player"
+  },
   user: {
     type: Object,
     default: null
@@ -40,11 +48,16 @@ const emit = defineEmits(["back-to-library"])
    - Join as spectator when player slot is full
    - Allow spectators to watch live game state
 ========================================================= */
+const activeRoomCode = computed(() => {
+  return props.watchRoomCode || props.roomCode
+})
+
 const gameSession = useGameSession({
   socket: () => props.socket,
-  roomCode: () => props.roomCode,
+  roomCode: () => activeRoomCode.value,
   gameId: "falling-blocks",
-  defaultRole: "player"
+  defaultRole: props.defaultRole,
+  allowLocalFallback: true
 })
 
 /* =========================================================
@@ -198,6 +211,11 @@ const nextLevelLines = computed(() => {
   return 10 - currentProgress
 })
 
+const nextLevelProgressPercent = computed(() => {
+  const currentProgress = lines.value % 10
+  return Math.min(100, Math.max(0, currentProgress * 10))
+})
+
 const displayBoard = computed(() => {
   const display = board.value.map((row) => {
     return row.map((cell) => {
@@ -239,10 +257,114 @@ const canControlGame = computed(() => {
   return gameSession.isPlayer.value
 })
 
+const currentUserName = computed(() => {
+  const metadata = props.user?.user_metadata || {}
+
+  return (
+    metadata.display_name ||
+    metadata.full_name ||
+    props.user?.email?.split("@")[0] ||
+    "Nah"
+  )
+})
+
+const currentUserInitial = computed(() => {
+  return currentUserName.value.charAt(0).toUpperCase() || "N"
+})
+
+const playerSlots = computed(() => {
+  return gameSession.session.value?.playerSlots || []
+})
+
+const spectators = computed(() => {
+  return gameSession.session.value?.spectators || []
+})
+
+const runnerSlot = computed(() => {
+  return (
+    playerSlots.value.find((slot) => slot.slotId === "P1") ||
+    playerSlots.value[0] ||
+    null
+  )
+})
+
+const runner = computed(() => {
+  return runnerSlot.value?.player || null
+})
+
+const runnerOccupied = computed(() => {
+  return Boolean(runnerSlot.value?.occupied || gameSession.localFallbackActive.value)
+})
+
+const runnerName = computed(() => {
+  return runner.value?.username || (gameSession.localFallbackActive.value ? currentUserName.value : "Nah")
+})
+
+const runnerInitial = computed(() => {
+  return runner.value?.initial || currentUserInitial.value
+})
+
+const normalizedPlayerCount = computed(() => {
+  if (gameSession.localFallbackActive.value) return 1
+  return Number(gameSession.playerCount.value || 0)
+})
+
+const normalizedMaxPlayers = computed(() => {
+  return Number(gameSession.maxPlayers.value || 1)
+})
+
 const sessionLabel = computed(() => {
-  if (gameSession.isPlayer.value) return "Player"
-  if (gameSession.isSpectator.value) return "Spectator"
+  if (gameSession.localFallbackActive.value || gameSession.isPlayer.value) return "Runner"
+  if (gameSession.isSpectator.value) return "Watcher"
   return "Connecting"
+})
+
+const roleSummaryLabel = computed(() => {
+  if (runnerOccupied.value) return `Runner | ${runnerName.value}`
+  return "Runner | Nah +"
+})
+
+const myRoleTitle = computed(() => {
+  if (gameSession.localFallbackActive.value || gameSession.isPlayer.value) return "You are Runner"
+  if (gameSession.isSpectator.value) return "You are Watching"
+  return "Choose your role"
+})
+
+const myRoleAccent = computed(() => {
+  if (gameSession.isSpectator.value) return "watch"
+  return "runner"
+})
+
+const canTakeRunnerSlot = computed(() => {
+  if (gameSession.localFallbackActive.value) return false
+  if (!activeRoomCode.value) return false
+  if (!runnerSlot.value) return true
+  if (!runnerSlot.value.occupied) return true
+  return runner.value?.socketId === props.socket?.id
+})
+
+const canBecomeWatcher = computed(() => {
+  if (!activeRoomCode.value) return false
+  if (gameSession.localFallbackActive.value) return false
+  return !gameSession.isSpectator.value
+})
+
+const sessionHint = computed(() => {
+  if (gameSession.localFallbackActive.value) return "Local fallback is active. This run is only on your screen."
+  if (gameSession.isPlayer.value) return "You control the live solo run. Watchers can view the board in real time."
+  if (gameSession.isSpectator.value && runnerOccupied.value) return "You are watching this run. Controls are locked until the Runner slot opens."
+  if (gameSession.isSpectator.value && !runnerOccupied.value) return "Runner slot is open. You can take over this run."
+  return "Connecting to live Falling Blocks session..."
+})
+
+const actionButtonLabel = computed(() => {
+  if (runnerOccupied.value && !gameSession.isPlayer.value) return "Take Runner Slot"
+  if (!runnerOccupied.value) return "Become Runner"
+  return "Runner Active"
+})
+
+const watcherList = computed(() => {
+  return spectators.value || []
 })
 
 
@@ -452,7 +574,7 @@ function startSecondTimer() {
   clearSecondTimer()
 
   secondTimer = setInterval(() => {
-    if (gameStatus.value === "playing") {
+    if (canControlGame.value && gameStatus.value === "playing") {
       elapsedSeconds.value += 1
     }
   }, 1000)
@@ -461,9 +583,11 @@ function startSecondTimer() {
 function scheduleNextDrop() {
   clearDropTimer()
 
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
 
   dropTimer = setTimeout(() => {
+    if (!canControlGame.value) return
     if (gameStatus.value !== "playing") return
 
     movePieceDown(false)
@@ -583,6 +707,7 @@ function movePieceHorizontal(direction) {
 }
 
 function movePieceDown(addScore = true) {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
   if (!activePiece.value) return
 
@@ -605,6 +730,7 @@ function movePieceDown(addScore = true) {
 }
 
 function hardDropPiece() {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
   if (!activePiece.value) return
 
@@ -632,6 +758,7 @@ function hardDropPiece() {
 }
 
 function rotateActivePiece() {
+  if (!canControlGame.value) return
   if (gameStatus.value !== "playing") return
   if (!activePiece.value) return
 
@@ -675,6 +802,7 @@ function isTypingTarget(target) {
 
 function handleKeyDown(event) {
   if (isTypingTarget(event.target)) return
+  if (!canControlGame.value) return
 
   const key = event.key
 
@@ -778,6 +906,20 @@ function getCellClass(cell) {
   ]
 }
 
+function becomeWatcher() {
+  if (!canBecomeWatcher.value) return
+
+  clearDropTimer()
+  clearSecondTimer()
+  gameSession.joinAsSpectator()
+}
+
+function takeRunnerSlot() {
+  if (!canTakeRunnerSlot.value) return
+
+  gameSession.joinAsPlayer("P1")
+}
+
 function handleBackToLibrary() {
   clearDropTimer()
   clearSecondTimer()
@@ -801,6 +943,22 @@ watch(
   () => gameSession.lastGameState.value,
   (nextState) => {
     applyFallingBlocksState(nextState)
+  }
+)
+
+watch(
+  () => gameSession.isPlayer.value,
+  (isRunner) => {
+    if (!isRunner) {
+      clearDropTimer()
+      clearSecondTimer()
+      return
+    }
+
+    if (gameStatus.value === "playing") {
+      startSecondTimer()
+      scheduleNextDrop()
+    }
   }
 )
 
@@ -832,21 +990,52 @@ watch(
         - Show current game session status
     ====================================================== -->
     <div class="falling-topbar">
-      <button
-        type="button"
-        class="back-btn"
-        @click="handleBackToLibrary"
-      >
-        ← Back to Library
-      </button>
+      <div class="topbar-left">
+        <button
+          type="button"
+          class="back-btn"
+          @click="handleBackToLibrary"
+        >
+          ← Back to Library
+        </button>
 
-      <div class="topbar-status">
-        <span>{{ props.roomCode || "VOXYN" }}</span>
-        <strong>
-          {{ sessionLabel }} ·
-          {{ gameSession.playerCount.value }}/{{ gameSession.maxPlayers.value }}
-          · 👁 {{ gameSession.spectatorCount.value }}
-        </strong>
+        <div class="game-heading-mini">
+          <span>Game 2</span>
+          <strong>▦ Falling Blocks</strong>
+        </div>
+      </div>
+
+      <div class="role-control-strip">
+        <button
+          type="button"
+          class="watch-btn"
+          :class="{ active: gameSession.isSpectator.value }"
+          :disabled="!canBecomeWatcher"
+          @click="becomeWatcher"
+        >
+          👁 Watch
+        </button>
+
+        <button
+          type="button"
+          class="runner-select-btn"
+          :class="myRoleAccent"
+          :disabled="!canTakeRunnerSlot"
+          @click="takeRunnerSlot"
+        >
+          <span class="runner-dot">{{ runnerInitial }}</span>
+          <strong>{{ roleSummaryLabel }}</strong>
+          <small v-if="!runnerOccupied">+</small>
+        </button>
+
+        <div class="topbar-status">
+          <span>{{ activeRoomCode || "VOXYN" }}</span>
+          <strong>
+            {{ sessionLabel }} ·
+            {{ normalizedPlayerCount }}/{{ normalizedMaxPlayers }}
+            · 👁 {{ gameSession.spectatorCount.value }}
+          </strong>
+        </div>
       </div>
     </div>
 
@@ -881,49 +1070,62 @@ watch(
         <div class="panel-card live-session-card">
           <div class="panel-heading">
             <h3>Live Session</h3>
-            <span>{{ sessionLabel }}</span>
+            <span>{{ myRoleTitle }}</span>
           </div>
 
-          <div class="stat-row compact">
-            <span>Players</span>
-            <strong>
-              {{ gameSession.playerCount.value }}/{{ gameSession.maxPlayers.value }}
-            </strong>
+          <div class="runner-card">
+            <div class="participant-avatar runner-avatar">
+              {{ runnerInitial }}
+            </div>
+
+            <div>
+              <strong>{{ runnerName }}</strong>
+              <span>{{ runnerOccupied ? "Runner · Host Slot" : "Runner Slot Open" }}</span>
+            </div>
           </div>
 
-          <div class="stat-row compact">
-            <span>Spectators</span>
-            <strong>{{ gameSession.spectatorCount.value }}</strong>
+          <div class="role-mini-grid">
+            <button
+              type="button"
+              class="role-mini-btn"
+              :class="{ active: gameSession.isPlayer.value || gameSession.localFallbackActive.value }"
+              :disabled="!canTakeRunnerSlot"
+              @click="takeRunnerSlot"
+            >
+              <strong>Runner</strong>
+              <span>{{ runnerOccupied ? runnerName : "Nah +" }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="role-mini-btn"
+              :class="{ active: gameSession.isSpectator.value }"
+              :disabled="!canBecomeWatcher"
+              @click="becomeWatcher"
+            >
+              <strong>Watch</strong>
+              <span>{{ gameSession.spectatorCount.value }} watching</span>
+            </button>
           </div>
 
           <button
             v-if="gameSession.isSpectator.value && gameSession.hasOpenPlayerSlot.value"
             type="button"
             class="start-btn"
-            @click="gameSession.joinAsPlayer()"
+            @click="takeRunnerSlot"
           >
-            Take Player Slot
+            {{ actionButtonLabel }}
           </button>
 
-          <p
-            v-if="gameSession.isSpectator.value"
-            class="difficulty-note"
-          >
-            You are watching this solo run. Controls are locked.
+          <p class="difficulty-note">
+            {{ sessionHint }}
           </p>
 
           <p
-            v-else-if="gameSession.isPlayer.value"
-            class="difficulty-note"
+            v-if="gameSession.sessionError.value"
+            class="session-error"
           >
-            You are controlling this run. Spectators can watch live.
-          </p>
-
-          <p
-            v-else
-            class="difficulty-note"
-          >
-            Connecting to live game session...
+            {{ gameSession.sessionError.value }}
           </p>
         </div>
 
@@ -1058,8 +1260,9 @@ watch(
             class="board-overlay"
           >
             <strong>Ready?</strong>
-            <span v-if="canControlGame">Choose difficulty and start.</span>
-            <span v-else>Waiting for the player to start.</span>
+            <span v-if="canControlGame">Choose difficulty and start your run.</span>
+            <span v-else-if="runnerOccupied">Waiting for the Runner to start.</span>
+            <span v-else>Runner slot is open.</span>
           </div>
 
           <div
@@ -1068,7 +1271,7 @@ watch(
           >
             <strong>Paused</strong>
             <span v-if="canControlGame">Press P or Resume.</span>
-            <span v-else>The player paused this run.</span>
+            <span v-else>The Runner paused this run.</span>
           </div>
 
           <div
@@ -1083,7 +1286,7 @@ watch(
             v-if="gameSession.isSpectator.value && gameStatus === 'playing'"
             class="spectator-badge"
           >
-            👁 Watching Live
+            👁 Watching {{ runnerName }}
           </div>
         </div>
       </main>
@@ -1091,11 +1294,10 @@ watch(
       <!-- ===================================================
           SECTION 2.3: Right Status Panel
           Purpose:
-          - Next piece
-          - Score / lines / level / timer
-          - Restart / back actions
+          - Compact right side
+          - Next piece / room info / game status / actions
       ==================================================== -->
-      <aside class="falling-panel right-panel">
+      <aside class="falling-panel right-panel compact-right-panel">
         <div class="panel-card next-card">
           <div class="panel-heading">
             <h3>Next Piece</h3>
@@ -1117,7 +1319,42 @@ watch(
           </div>
         </div>
 
-        <div class="panel-card stats-card">
+        <div class="panel-card room-info-card">
+          <div class="panel-heading">
+            <h3>Room Info</h3>
+            <span>{{ activeRoomCode || "Local" }}</span>
+          </div>
+
+          <div class="room-role-row">
+            <span>Runner</span>
+            <strong>{{ runnerOccupied ? runnerName : "Nah +" }}</strong>
+          </div>
+
+          <div class="room-role-row">
+            <span>Watchers</span>
+            <strong>{{ gameSession.spectatorCount.value }}</strong>
+          </div>
+
+          <div class="watcher-list compact-watcher-list">
+            <div
+              v-if="watcherList.length === 0"
+              class="empty-watchers"
+            >
+              No watchers yet.
+            </div>
+
+            <div
+              v-for="watcher in watcherList"
+              :key="watcher.socketId"
+              class="watcher-chip"
+            >
+              <span>{{ watcher.initial || "W" }}</span>
+              <strong>{{ watcher.username || "Watcher" }}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card stats-card compact-stats-card">
           <div class="panel-heading">
             <h3>Game Status</h3>
 
@@ -1158,7 +1395,7 @@ watch(
           </div>
         </div>
 
-        <div class="side-actions">
+        <div class="side-actions compact-side-actions">
           <button
             type="button"
             class="restart-btn"
@@ -1185,175 +1422,395 @@ watch(
 /* =========================================================
    SECTION 1: Falling Blocks Shell
    Purpose:
-   - Fit inside VOXYN Stage 2 Game Area
+   - v0.83 ratio polish
+   - Keep the approved Runner / Watcher logic
+   - Make the stage feel lighter, wider, and less vertically cramped
 ========================================================= */
 .falling-blocks-screen {
   width: 100%;
   min-height: 100%;
-  padding: 22px;
-  color: #e5edff;
+  padding: 10px 16px 18px;
+  color: #0f172a;
   box-sizing: border-box;
 }
 
 .falling-topbar {
+  min-height: 42px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 9px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 72% 0%, rgba(168, 85, 247, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.72));
+  box-shadow:
+    0 18px 45px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(20px);
+}
+
+.topbar-left,
+.role-control-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.game-heading-mini {
+  display: grid;
+  gap: 4px;
+}
+
+.game-heading-mini span {
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.game-heading-mini strong {
+  color: #0f172a;
+  font-size: 19px;
+  font-weight: 950;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+.back-btn,
+.secondary-back-btn,
+.watch-btn,
+.runner-select-btn {
+  min-height: 38px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #334155;
+  background: rgba(255, 255, 255, 0.78);
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.back-btn:hover,
+.secondary-back-btn:hover,
+.watch-btn:hover,
+.runner-select-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(37, 99, 235, 0.32);
+  box-shadow:
+    0 16px 34px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
 .back-btn,
 .secondary-back-btn {
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  color: #dbeafe;
-  background: rgba(15, 23, 42, 0.62);
-  border-radius: 12px;
-  min-height: 42px;
-  padding: 0 18px;
-  font-weight: 900;
-  cursor: pointer;
+  padding: 0 14px;
 }
 
-.back-btn:hover,
-.secondary-back-btn:hover {
-  border-color: rgba(96, 165, 250, 0.52);
-  background: rgba(30, 64, 175, 0.34);
+.watch-btn {
+  padding: 0 16px;
+  color: #1e293b;
+}
+
+.watch-btn.active {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(219, 234, 254, 0.86);
+}
+
+.runner-select-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 172px;
+  padding: 0 14px 0 9px;
+}
+
+.runner-select-btn.runner {
+  color: white;
+  border-color: rgba(37, 99, 235, 0.36);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow:
+    0 18px 45px rgba(79, 70, 229, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26);
+}
+
+.runner-select-btn.watch {
+  color: #2563eb;
+  border-color: rgba(37, 99, 235, 0.32);
+  background: rgba(239, 246, 255, 0.88);
+}
+
+.runner-dot {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  border-radius: 999px;
+  color: white;
+  background: linear-gradient(135deg, #22c55e, #2563eb);
+  font-size: 12px;
+  font-weight: 950;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.24);
+}
+
+.runner-select-btn strong {
+  max-width: 148px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.runner-select-btn small {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #042f2e;
+  background: #86efac;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.watch-btn:disabled,
+.runner-select-btn:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .topbar-status {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 11px;
   border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.22);
-  background: rgba(2, 6, 23, 0.48);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
 }
 
 .topbar-status span {
-  color: #60a5fa;
-  font-size: 13px;
+  color: #2563eb;
+  font-size: 12px;
   font-weight: 950;
 }
 
 .topbar-status strong {
-  color: #86efac;
-  font-size: 13px;
+  color: #16a34a;
+  font-size: 12px;
+  font-weight: 950;
 }
 
 /* =========================================================
    SECTION 2: Main Layout
+   Purpose:
+   - New proportion: compact left, large center board, stacked right tools
 ========================================================= */
 .falling-layout {
   display: grid;
-  grid-template-columns: minmax(230px, 300px) minmax(300px, 430px) minmax(230px, 290px);
-  gap: 18px;
+  grid-template-columns: minmax(230px, 260px) minmax(280px, 340px) minmax(320px, 1fr);
+  gap: 10px;
   align-items: start;
 }
 
 .falling-panel {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.left-panel {
+  align-content: start;
+}
+
+.right-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  align-content: start;
+}
+
+.right-panel .stats-card,
+.right-panel .side-actions,
+.right-panel .run-command-card {
+  grid-column: 1 / -1;
 }
 
 .game-title-card,
 .panel-card {
-  border: 1px solid rgba(148, 163, 184, 0.17);
-  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 22px;
   background:
-    linear-gradient(145deg, rgba(15, 23, 42, 0.78), rgba(15, 23, 42, 0.42));
+    radial-gradient(circle at 80% 0%, rgba(168, 85, 247, 0.08), transparent 32%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.72));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 18px 50px rgba(2, 6, 23, 0.28);
+    0 20px 55px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(18px);
 }
 
 .game-title-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 18px;
-}
-
-.game-icon {
-  width: 76px;
-  height: 76px;
-  flex: 0 0 76px;
-  display: grid;
-  place-items: center;
-  border-radius: 18px;
-  color: white;
-  font-size: 34px;
-  background:
-    radial-gradient(circle at 30% 20%, rgba(244, 114, 182, 0.74), transparent 34%),
-    linear-gradient(135deg, #7c3aed, #2563eb);
-  box-shadow: 0 18px 48px rgba(124, 58, 237, 0.32);
-}
-
-.game-title-card p,
-.board-header p {
-  margin: 0 0 6px;
-  color: #60a5fa;
-  font-size: 12px;
-  font-weight: 950;
-}
-
-.game-title-card h2,
-.board-header h3 {
-  margin: 0;
-  color: white;
-  font-size: 24px;
-  font-weight: 950;
-  letter-spacing: -0.04em;
-}
-
-.game-title-card span {
-  display: inline-flex;
-  margin-top: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: #bfdbfe;
-  background: rgba(37, 99, 235, 0.28);
-  font-size: 12px;
-  font-weight: 950;
-}
-
-.game-title-card small {
-  display: block;
-  margin-top: 10px;
-  color: #aab8d6;
-  font-size: 13px;
-  font-weight: 750;
-  line-height: 1.45;
+  display: none;
 }
 
 .panel-card {
-  padding: 16px;
+  padding: 12px;
 }
 
 .panel-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 9px;
 }
 
 .panel-heading h3 {
   margin: 0;
-  color: #dbeafe;
+  color: #1e293b;
   font-size: 15px;
   font-weight: 950;
+  letter-spacing: -0.02em;
 }
 
 .panel-heading span {
-  color: #60a5fa;
+  color: #2563eb;
   font-size: 12px;
   font-weight: 950;
 }
 
 /* =========================================================
-   SECTION 3: Difficulty / Controls
+   SECTION 3: Runner / Watcher Card
+========================================================= */
+.live-session-card {
+  padding: 12px;
+}
+
+.runner-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(239, 246, 255, 0.76);
+}
+
+.participant-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: white;
+  font-size: 15px;
+  font-weight: 950;
+  background: linear-gradient(135deg, #22c55e, #2563eb);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.22);
+}
+
+.runner-card strong {
+  display: block;
+  max-width: 170px;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 950;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.runner-card span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.role-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.role-mini-btn {
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #475569;
+  background: rgba(248, 250, 252, 0.82);
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-mini-btn strong,
+.role-mini-btn span {
+  display: block;
+}
+
+.role-mini-btn strong {
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.role-mini-btn span {
+  max-width: 100%;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.role-mini-btn.active {
+  border-color: rgba(37, 99, 235, 0.54);
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.22);
+}
+
+.role-mini-btn.active strong,
+.role-mini-btn.active span {
+  color: white;
+}
+
+.role-mini-btn:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
+.session-error {
+  margin: 10px 0 0;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+/* =========================================================
+   SECTION 4: Difficulty / Controls
 ========================================================= */
 .difficulty-grid {
   display: grid;
@@ -1362,14 +1819,14 @@ watch(
 }
 
 .difficulty-btn {
-  min-height: 62px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  min-height: 42px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 14px;
-  color: #cbd5e1;
-  background: rgba(15, 23, 42, 0.55);
+  color: #334155;
+  background: rgba(248, 250, 252, 0.86);
   cursor: pointer;
   text-align: left;
-  padding: 10px;
+  padding: 8px 10px;
 }
 
 .difficulty-btn strong,
@@ -1384,16 +1841,20 @@ watch(
 
 .difficulty-btn small {
   margin-top: 6px;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 11px;
   font-weight: 850;
 }
 
 .difficulty-btn.active {
   color: white;
-  border-color: rgba(96, 165, 250, 0.8);
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.92), rgba(79, 70, 229, 0.76));
-  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.28);
+  border-color: rgba(37, 99, 235, 0.62);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 16px 38px rgba(37, 99, 235, 0.24);
+}
+
+.difficulty-btn.active small {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .difficulty-btn:disabled {
@@ -1403,26 +1864,33 @@ watch(
 
 .difficulty-note {
   margin: 12px 0 0;
-  color: #93c5fd;
+  color: #2563eb;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 850;
+  line-height: 1.4;
 }
 
 .controls-card h3 {
-  margin: 0 0 12px;
-  color: #dbeafe;
+  margin: 0 0 10px;
+  color: #1e293b;
   font-size: 15px;
+  font-weight: 950;
 }
 
 .control-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
-  gap: 8px;
-  min-height: 38px;
+  gap: 7px;
+  min-height: 28px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-  color: #cbd5e1;
-  font-size: 13px;
-  font-weight: 800;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.control-row:nth-child(n + 4) {
+  grid-template-columns: auto 1fr;
 }
 
 .control-row:last-child {
@@ -1430,17 +1898,17 @@ watch(
 }
 
 kbd {
-  min-width: 30px;
-  height: 26px;
-  padding: 0 8px;
+  min-width: 24px;
+  height: 21px;
+  padding: 0 7px;
   display: inline-grid;
   place-items: center;
   border-radius: 8px;
   color: white;
-  background: rgba(51, 65, 85, 0.88);
-  font-size: 12px;
+  background: #1e293b;
+  font-size: 11px;
   font-weight: 950;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .primary-actions {
@@ -1450,18 +1918,18 @@ kbd {
 .start-btn,
 .pause-btn,
 .restart-btn {
-  min-height: 54px;
+  min-height: 42px;
   border: none;
   border-radius: 14px;
   color: white;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 950;
   cursor: pointer;
 }
 
 .start-btn {
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
-  box-shadow: 0 16px 42px rgba(37, 99, 235, 0.32);
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 16px 42px rgba(37, 99, 235, 0.28);
 }
 
 .pause-btn {
@@ -1469,62 +1937,44 @@ kbd {
 }
 
 .restart-btn {
-  background: linear-gradient(135deg, #ef4444, #b91c1c);
-  box-shadow: 0 16px 42px rgba(239, 68, 68, 0.22);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: none;
+}
+
+.start-btn:disabled,
+.pause-btn:disabled,
+.restart-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 /* =========================================================
-   SECTION 4: Board
+   SECTION 5: Board
 ========================================================= */
 .board-zone {
   min-width: 0;
 }
 
 .board-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 12px;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 950;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.7);
-}
-
-.status-pill.playing {
-  color: #86efac;
-}
-
-.status-pill.paused {
-  color: #fde68a;
-}
-
-.status-pill.game-over {
-  color: #fca5a5;
+  display: none;
 }
 
 .game-board-frame {
   position: relative;
-  width: min(100%, 430px);
+  width: min(100%, 320px);
   margin: 0 auto;
-  padding: 14px;
+  padding: 12px;
   border-radius: 24px;
-  border: 1px solid rgba(96, 165, 250, 0.64);
+  border: 1px solid rgba(37, 99, 235, 0.28);
   background:
-    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.28), transparent 36%),
-    rgba(2, 6, 23, 0.72);
+    radial-gradient(circle at 50% 0%, rgba(37, 99, 235, 0.2), transparent 38%),
+    #0b1222;
   box-shadow:
-    0 26px 80px rgba(37, 99, 235, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    0 26px 80px rgba(37, 99, 235, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .game-board {
@@ -1535,79 +1985,60 @@ kbd {
   overflow: hidden;
   border-radius: 14px;
   background:
-    linear-gradient(rgba(96, 165, 250, 0.09) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(96, 165, 250, 0.09) 1px, transparent 1px),
-    rgba(15, 23, 42, 0.76);
+    linear-gradient(rgba(148, 163, 184, 0.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.13) 1px, transparent 1px),
+    #0f172a;
   background-size: 10% 6.666%, 10% 6.666%, auto;
 }
 
 .board-cell,
 .preview-cell {
-  border: 1px solid rgba(96, 165, 250, 0.08);
-  background: rgba(15, 23, 42, 0.34);
+  border: 1px solid rgba(96, 165, 250, 0.07);
+  background: rgba(15, 23, 42, 0.18);
   box-sizing: border-box;
 }
 
 .board-cell.filled,
 .preview-cell.filled {
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.22);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
     inset 0 -8px 14px rgba(15, 23, 42, 0.24),
-    0 0 16px rgba(96, 165, 250, 0.18);
+    0 0 16px rgba(96, 165, 250, 0.16);
 }
 
 .board-cell.active {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.48),
-    0 0 20px rgba(168, 85, 247, 0.44);
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    0 0 20px rgba(168, 85, 247, 0.48);
 }
 
-.type-i {
-  background: linear-gradient(135deg, #22d3ee, #2563eb);
-}
-
-.type-o {
-  background: linear-gradient(135deg, #facc15, #f59e0b);
-}
-
-.type-t {
-  background: linear-gradient(135deg, #c084fc, #7c3aed);
-}
-
-.type-s {
-  background: linear-gradient(135deg, #86efac, #16a34a);
-}
-
-.type-z {
-  background: linear-gradient(135deg, #fb7185, #dc2626);
-}
-
-.type-j {
-  background: linear-gradient(135deg, #60a5fa, #1d4ed8);
-}
-
-.type-l {
-  background: linear-gradient(135deg, #fdba74, #ea580c);
-}
+.type-i { background: linear-gradient(135deg, #22d3ee, #2563eb); }
+.type-o { background: linear-gradient(135deg, #facc15, #f59e0b); }
+.type-t { background: linear-gradient(135deg, #c084fc, #7c3aed); }
+.type-s { background: linear-gradient(135deg, #86efac, #16a34a); }
+.type-z { background: linear-gradient(135deg, #fb7185, #dc2626); }
+.type-j { background: linear-gradient(135deg, #60a5fa, #1d4ed8); }
+.type-l { background: linear-gradient(135deg, #fdba74, #ea580c); }
 
 .board-overlay {
   position: absolute;
-  inset: 14px;
+  inset: 12px;
   display: grid;
   place-content: center;
   justify-items: center;
   gap: 8px;
   border-radius: 14px;
-  background: rgba(2, 6, 23, 0.64);
+  background: rgba(2, 6, 23, 0.58);
   backdrop-filter: blur(10px);
   text-align: center;
 }
 
 .board-overlay strong {
   color: white;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 950;
+  letter-spacing: -0.04em;
 }
 
 .board-overlay span {
@@ -1620,65 +2051,178 @@ kbd {
   color: #fca5a5;
 }
 
+.spectator-badge {
+  position: absolute;
+  right: 24px;
+  top: 24px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  color: #bfdbfe;
+  background: rgba(15, 23, 42, 0.72);
+  font-size: 12px;
+  font-weight: 950;
+  backdrop-filter: blur(10px);
+}
+
 /* =========================================================
-   SECTION 5: Right Stats / Preview
+   SECTION 6: Right Stats / Preview
 ========================================================= */
+.next-card,
+.room-info-card {
+  min-height: 128px;
+}
+
 .preview-grid {
-  width: 112px;
-  height: 112px;
+  width: 88px;
+  height: 88px;
   margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-rows: repeat(4, minmax(0, 1fr));
   gap: 4px;
-  padding: 10px;
-  border-radius: 16px;
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  background: rgba(2, 6, 23, 0.52);
+  padding: 8px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: #0f172a;
 }
 
 .preview-cell {
   border-radius: 6px;
 }
 
-.stat-row {
-  padding: 13px 0;
+.room-role-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.room-role-row span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.room-role-row strong {
+  max-width: 145px;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 950;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.watcher-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.empty-watchers {
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: #64748b;
+  background: rgba(241, 245, 249, 0.78);
+  font-size: 12px;
+  font-weight: 850;
+  text-align: center;
+}
+
+.watcher-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 9px;
+  border-radius: 13px;
+  background: rgba(239, 246, 255, 0.82);
+}
+
+.watcher-chip span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: white;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.watcher-chip strong {
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stats-card {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.stats-card .panel-heading {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.stat-row {
+  min-height: 58px;
+  padding: 8px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.72);
+  text-align: center;
+}
+
 .stat-row:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
 .stat-row span,
 .stat-row small {
   display: block;
-  color: #94a3b8;
-  font-size: 12px;
+  color: #64748b;
+  font-size: 11px;
   font-weight: 900;
 }
 
 .stat-row strong {
   display: block;
   margin-top: 5px;
-  color: white;
-  font-size: 28px;
+  color: #0f172a;
+  font-size: 20px;
   font-weight: 950;
   letter-spacing: -0.04em;
 }
 
 .stat-row small {
-  margin-top: 3px;
-  color: #93c5fd;
+  margin-top: 2px;
+  color: #2563eb;
 }
 
 .mini-pause-btn {
   width: 38px;
   height: 34px;
-  border: 1px solid rgba(96, 165, 250, 0.28);
-  border-radius: 11px;
-  color: white;
-  background: rgba(37, 99, 235, 0.28);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 12px;
+  color: #2563eb;
+  background: rgba(239, 246, 255, 0.92);
   cursor: pointer;
 }
 
@@ -1689,15 +2233,114 @@ kbd {
 
 .side-actions {
   display: grid;
-  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
-.secondary-back-btn {
+.side-actions .secondary-back-btn {
   width: 100%;
+  color: #334155;
 }
 
 /* =========================================================
-   SECTION 6: Responsive Layout
+   SECTION 6.5: Run Control Summary
+   Purpose:
+   - Fill lower-right empty space with useful live session data
+   - Keep the section compact and consistent with the glass UI
+========================================================= */
+.run-command-card {
+  min-height: 158px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.run-command-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.run-command-item {
+  min-height: 58px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background:
+    radial-gradient(circle at 90% 0%, rgba(37, 99, 235, 0.08), transparent 36%),
+    rgba(248, 250, 252, 0.74);
+}
+
+.run-command-item span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.run-command-item strong {
+  display: block;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 950;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.level-progress-card {
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  background: rgba(239, 246, 255, 0.62);
+}
+
+.level-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.level-progress-header span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.level-progress-header strong {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.level-progress-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.level-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
+  box-shadow: 0 0 18px rgba(79, 70, 229, 0.32);
+  transition: width 0.22s ease;
+}
+
+.run-command-note {
+  margin: 0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+/* =========================================================
+   SECTION 7: Responsive Layout
 ========================================================= */
 @media (max-width: 1180px) {
   .falling-layout {
@@ -1709,19 +2352,42 @@ kbd {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .side-actions {
-    align-content: start;
+  .right-panel .stats-card,
+  .right-panel .side-actions,
+  .right-panel .run-command-card {
+    grid-column: auto;
+  }
+
+  .stats-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-card .panel-heading {
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 760px) {
   .falling-blocks-screen {
-    padding: 16px;
+    padding: 14px 14px 84px;
   }
 
-  .falling-topbar {
+  .falling-topbar,
+  .topbar-left,
+  .role-control-strip {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .role-control-strip {
+    width: 100%;
+  }
+
+  .watch-btn,
+  .runner-select-btn,
+  .topbar-status {
+    width: 100%;
+    justify-content: center;
   }
 
   .falling-layout {
@@ -1732,36 +2398,160 @@ kbd {
     grid-template-columns: 1fr;
   }
 
-  .game-title-card {
-    align-items: flex-start;
+  .right-panel .stats-card,
+  .right-panel .side-actions,
+  .right-panel .run-command-card {
+    grid-column: auto;
+  }
+
+  .stats-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .game-board-frame {
-    width: min(100%, 360px);
+    width: min(100%, 340px);
+  }
+
+  .side-actions {
+    grid-template-columns: 1fr;
   }
 }
 
-.spectator-badge {
-  position: absolute;
-  right: 24px;
-  top: 24px;
-  z-index: 4;
+/* =========================================================
+   SECTION 8: v0.83 Fit Pass
+   Purpose:
+   - Keep the whole Falling Blocks game visible inside Stage 2
+   - Restore better proportions after the first ratio polish
+========================================================= */
+@media (min-width: 1181px) {
+  .falling-blocks-screen {
+    padding-top: 8px;
+    padding-bottom: 18px;
+  }
 
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
+  .falling-topbar {
+    min-height: 56px;
+    margin-bottom: 10px;
+  }
 
-  border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.42);
+  .falling-layout {
+    grid-template-columns: 250px 370px minmax(430px, 1fr);
+    gap: 14px;
+  }
 
-  color: #bfdbfe;
-  background: rgba(15, 23, 42, 0.72);
+  .game-board-frame {
+    width: min(100%, 356px);
+  }
 
-  font-size: 12px;
-  font-weight: 950;
+  .right-panel {
+    grid-template-columns: 190px minmax(260px, 1fr);
+    gap: 12px;
+  }
 
-  backdrop-filter: blur(10px);
+  .stats-card {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .controls-card {
+    padding-top: 11px;
+    padding-bottom: 11px;
+  }
+
+  .control-row {
+    min-height: 25px;
+  }
+
+  .difficulty-grid,
+  .role-mini-grid {
+    gap: 8px;
+  }
+
+  .side-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .run-command-card {
+    min-height: 176px;
+  }
+}
+
+/* =========================================================
+   SECTION 9: Compact Falling Blocks Patch
+   Purpose:
+   - Remove visual overload
+   - Keep right side useful but not crowded
+   - Improve board / side panel ratio
+========================================================= */
+@media (min-width: 1181px) {
+  .falling-blocks-screen {
+    padding: 8px 16px 18px;
+  }
+
+  .falling-topbar {
+    min-height: 50px;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+  }
+
+  .falling-layout {
+    grid-template-columns: 250px 390px minmax(420px, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .game-board-frame {
+    width: min(100%, 382px);
+    padding: 12px;
+  }
+
+  .compact-right-panel {
+    display: grid;
+    grid-template-columns: 190px minmax(260px, 1fr);
+    gap: 12px;
+    align-content: start;
+  }
+
+  .compact-right-panel .stats-card,
+  .compact-right-panel .side-actions {
+    grid-column: 1 / -1;
+  }
+
+  .next-card,
+  .room-info-card {
+    min-height: 126px;
+  }
+
+  .preview-grid {
+    width: 82px;
+    height: 82px;
+  }
+
+  .compact-stats-card {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .compact-stats-card .panel-heading {
+    grid-column: 1 / -1;
+  }
+
+  .stat-row {
+    min-height: 54px;
+    padding: 7px 6px;
+  }
+
+  .stat-row strong {
+    font-size: 19px;
+  }
+
+  .compact-side-actions {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .run-command-card {
+    display: none !important;
+  }
 }
 
 </style>

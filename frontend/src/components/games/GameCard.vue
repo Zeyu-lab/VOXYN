@@ -9,20 +9,31 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(["launch-game"])
+const emit = defineEmits(["launch-game", "open-game-rooms"])
 
 /* =========================================================
    SECTION 2: Actions
 ========================================================= */
-function launchGame(mode) {
-  emit("launch-game", {
+function createGamePayload() {
+  return {
     gameId: props.game.id,
     gameTitle: props.game.title,
     gameNumber: props.game.number,
-    mode: mode.toLowerCase(),
-    modeLabel: mode,
+    players: props.game.players,
     ready: props.game.ready
+  }
+}
+
+function launchGame(mode) {
+  emit("launch-game", {
+    ...createGamePayload(),
+    mode: mode.toLowerCase(),
+    modeLabel: mode
   })
+}
+
+function openGameRooms() {
+  emit("open-game-rooms", createGamePayload())
 }
 </script>
 
@@ -64,6 +75,14 @@ function launchGame(mode) {
       >
         {{ mode === "AI" ? "🤖" : "👥" }}
         {{ mode }}
+      </button>
+
+      <button
+        type="button"
+        class="mode-btn room-btn"
+        @click="openGameRooms"
+      >
+        👁 Rooms
       </button>
     </div>
 
@@ -324,6 +343,21 @@ function launchGame(mode) {
 
 .mode-btn.multiplayer {
   background: linear-gradient(135deg, #0a84ff, #4f46e5);
+}
+
+.mode-btn.room-btn {
+  color: #2563eb;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.86), rgba(239,246,255,0.72)),
+    rgba(255, 255, 255, 0.68);
+  border-color: rgba(59, 130, 246, 0.18);
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.10),
+    inset 0 1px 0 rgba(255,255,255,0.92);
+}
+
+.mode-btn.room-btn:hover {
+  border-color: rgba(37, 99, 235, 0.30);
 }
 
 /* =========================================================
