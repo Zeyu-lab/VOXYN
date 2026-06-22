@@ -13,15 +13,13 @@ import GameCard from "./GameCard.vue"
    - Send selected game + mode up to GameStage
 ========================================================= */
 const emit = defineEmits(["launch-game", "open-game-rooms"])
-
 /* =========================================================
    SECTION 3: Game Catalog
    Purpose:
    - Central registry for all VOXYN game cards
    - Add / remove / edit games here only
-   - Future games should be added as new objects below
-   Notes:
    - id must match GameStage game component registry
+   Notes:
    - ready = true means playable now
    - ready = false means preview / coming soon
 ========================================================= */
@@ -32,6 +30,7 @@ const games = [
     title: "Tic Tac Toe",
     subtitle: "Classic 3x3 strategy duel.",
     cover: "duel",
+    compactIcon: "XO",
     players: "1–2 players",
     modes: ["AI", "Multiplayer"],
     ready: true
@@ -42,66 +41,73 @@ const games = [
     title: "Falling Blocks",
     subtitle: "Stack smart. Clear lines. Beat your high score.",
     cover: "grid",
+    compactIcon: "▦",
+    players: "1 player",
+    modes: ["Single Player"],
+    ready: true
+  },
+  {
+    id: "2048",
+    number: "Game 3",
+    title: "2048",
+    subtitle: "Merge tiles. Build higher. Reach 2048.",
+    cover: "tiles",
+    compactIcon: "2048",
+    players: "1 player",
+    modes: ["Single Player"],
+    ready: true
+  },
+  {
+    id: "minesweeper",
+    number: "Game 4",
+    title: "Minesweeper",
+    subtitle: "Clear the board without hitting mines.",
+    cover: "hex",
+    compactIcon: "✦",
     players: "1 player",
     modes: ["Single Player"],
     ready: false
   },
   {
-    id: "game-3",
-    number: "Game 3",
-    title: "Game 3",
-    subtitle: "Plan, adapt, dominate.",
-    cover: "orbit",
-    players: "2–6 players",
+    id: "blackjack",
+    number: "Game 5",
+    title: "Blackjack",
+    subtitle: "Hit, stand, and beat the dealer.",
+    cover: "chess",
+    compactIcon: "21",
+    players: "1–4 players",
     modes: ["AI", "Multiplayer"],
     ready: false
   },
   {
-    id: "game-4",
-    number: "Game 4",
-    title: "Game 4",
-    subtitle: "Outsmart your opponents.",
-    cover: "hex",
-    players: "2–4 players",
-    modes: ["Multiplayer"],
-    ready: false
-  },
-  {
-    id: "game-5",
-    number: "Game 5",
-    title: "Coming Soon",
-    subtitle: "More VOXYN games later.",
-    cover: "chess",
-    players: "1–2 players",
-    modes: ["AI"],
-    ready: false
-  },
-  {
-    id: "game-6",
+    id: "chess",
     number: "Game 6",
-    title: "Coming Soon",
-    subtitle: "More VOXYN games later.",
+    title: "Chess",
+    subtitle: "Classic board strategy for serious duels.",
+    cover: "orbit",
+    compactIcon: "♟",
+    players: "1–2 players",
+    modes: ["AI", "Multiplayer"],
+    ready: false
+  },
+  {
+    id: "word-battle",
+    number: "Game 7",
+    title: "Word Battle",
+    subtitle: "Fast typing, quick thinking, party pressure.",
     cover: "word",
+    compactIcon: "Aa",
     players: "2–8 players",
     modes: ["Multiplayer"],
     ready: false
   },
   {
-    id: "game-7",
-    number: "Game 7",
-    title: "Coming Soon",
-    subtitle: "More VOXYN games later.",
-    cover: "race",
-    players: "2–4 players",
-    modes: ["Multiplayer"],
-    ready: false
-  },
-  {
-    id: "game-8",
+    id: "party-quiz",
     number: "Game 8",
-    title: "Coming Soon",
-    subtitle: "More VOXYN games later.",
+    title: "Party Quiz",
+    subtitle: "Answer fast and compete with the room.",
     cover: "quiz",
+    compactIcon: "?",
     players: "2–8 players",
     modes: ["AI", "Multiplayer"],
     ready: false
@@ -229,7 +235,7 @@ function openGameRoomsFromCard(payload) {
             class="compact-game-art"
             :class="`compact-${game.cover}`"
             >
-            <span>{{ game.ready ? "01" : "◇" }}</span>
+            <span>{{ game.compactIcon || (game.ready ? "01" : "◇") }}</span>
             </div>
 
             <div class="compact-game-info">

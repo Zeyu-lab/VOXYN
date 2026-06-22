@@ -735,6 +735,15 @@ const GAME_CONFIGS = {
     allowSpectators: true,
     mode: "solo-live",
   },
+
+  "2048": {
+    gameId: "2048",
+    title: "2048",
+    maxPlayers: 1,
+    playerSlots: ["P1"],
+    allowSpectators: true,
+    mode: "solo-live",
+  },
 };
 
 function getGameConfig(gameId) {
@@ -763,6 +772,22 @@ function createInitialGameState(gameId) {
       elapsedSeconds: 0,
       status: "idle",
       difficulty: "standard",
+    };
+  }
+  
+  if (gameId === "2048") {
+    return {
+      board: [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ],
+      score: 0,
+      bestScore: 0,
+      moves: 0,
+      elapsedSeconds: 0,
+      status: "idle",
     };
   }
 

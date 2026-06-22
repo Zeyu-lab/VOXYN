@@ -35,6 +35,15 @@ function launchGame(mode) {
 function openGameRooms() {
   emit("open-game-rooms", createGamePayload())
 }
+
+function getModeIcon(mode) {
+  if (mode === "AI") return "🤖"
+  if (mode === "Single Player") return "🎮"
+  if (mode === "Multiplayer") return "👥"
+
+  return "▶"
+}
+
 </script>
 
 <template>
@@ -73,7 +82,7 @@ function openGameRooms() {
         :class="mode.toLowerCase()"
         @click="launchGame(mode)"
       >
-        {{ mode === "AI" ? "🤖" : "👥" }}
+        {{ getModeIcon(mode) }}
         {{ mode }}
       </button>
 
@@ -84,6 +93,7 @@ function openGameRooms() {
       >
         👁 Rooms
       </button>
+
     </div>
 
     <div class="game-meta">
@@ -266,6 +276,60 @@ function openGameRooms() {
 }
 
 /* =========================================================
+   SECTION 2.1: Cover Variant - 2048 Tiles
+========================================================= */
+.cover-tiles {
+  background:
+    radial-gradient(circle at 22% 18%, rgba(59, 130, 246, 0.24), transparent 34%),
+    radial-gradient(circle at 82% 76%, rgba(168, 85, 247, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 244, 255, 0.78));
+}
+
+.cover-tiles .cover-shape {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  transform: rotate(0);
+}
+
+.cover-tiles .cover-shape.one {
+  left: 42px;
+  top: 28px;
+}
+
+.cover-tiles .cover-shape.two {
+  right: 42px;
+  top: 44px;
+}
+
+.cover-tiles .cover-line {
+  width: 82px;
+  height: 82px;
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(219, 234, 254, 0.54));
+  border: 2px solid rgba(96, 165, 250, 0.32);
+  box-shadow:
+    0 16px 36px rgba(37, 99, 235, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.cover-tiles .cover-line::after {
+  content: "2048";
+  position: absolute;
+  inset: 0;
+
+  display: grid;
+  place-items: center;
+
+  color: #2563eb;
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: -0.06em;
+}
+
+
+/* =========================================================
    SECTION 3: Text
 ========================================================= */
 .game-content {
@@ -381,4 +445,35 @@ function openGameRooms() {
 .game-meta strong {
   color: #2563eb;
 }
+
+/* =========================================================
+   SECTION 6.1: Compact Cover Variants
+========================================================= */
+.compact-tiles {
+  background:
+    radial-gradient(circle at 28% 18%, rgba(59, 130, 246, 0.26), transparent 34%),
+    radial-gradient(circle at 78% 76%, rgba(168, 85, 247, 0.18), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(238, 244, 255, 0.78));
+}
+
+.compact-tiles span {
+  width: 48px;
+  height: 48px;
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  box-shadow:
+    0 10px 22px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: -0.06em;
+}
+
 </style>

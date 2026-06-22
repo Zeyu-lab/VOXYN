@@ -105,7 +105,7 @@ v0.53 Update
 - Prepared voice channel behavior for a more Discord-like room experience
 
 propmt
-cloudflared tunnel --url http://localhost:3001
+cloudflared tunnel --url http://localhost:5173
 npm run build
 npm run dev
 
@@ -308,3 +308,85 @@ v0.9
 - Adjusted Falling Blocks layout, proportions, and section structure to better fit VOXYN Stage 2 without wasting too much space.
 - Continued polishing the Apple-style white liquid-glass UI direction across the game experience.
 - Prepared the Stage 2 game system for more multiplayer games before VOXYN v1.0.
+
+v1.0
+-
+- VOXYN has reached its first stable product milestone.
+- The project is now considered feature-complete for the v1.0 scope.
+- Further game expansion is paused for now; v1.0 will focus on stability, cleanup, and presentation quality.
+
+Core Platform
+-
+- Completed the main VOXYN product flow:
+  Home → Login / Signup → Dashboard → Room Workspace → Game Library → Game Stage.
+- The app now has a clear social-room structure instead of being only a collection of isolated pages.
+- Dashboard, RoomView, GameLibrary, GameStage, Profile, Login, and Signup are now connected into one usable prototype.
+- The overall design direction has been unified around a clean Apple-style / liquid-glass visual language.
+
+Authentication
+-
+- Replaced the simple Supabase signup flow with a custom email OTP registration system.
+- Signup now sends a 6-digit verification code through the Express backend.
+- Added backend-side OTP generation, hashing, expiration, resend cooldown, and verification flow.
+- Supabase is still used as the account/profile storage layer for v1.0.
+- Gmail SMTP App Password setup was confirmed working for real email delivery.
+- Added Slider Security Verification before requesting signup OTP codes to reduce abuse and repeated email sending.
+- The signup flow now feels closer to a real production-style authentication system.
+
+Room System
+-
+- Room creation, joining, leaving, and room workspace UI are now usable.
+- RoomView displays room code, owner, member count, voice status, invite copy, and room controls.
+- Socket.IO is used to manage real-time room state.
+- The project now supports the basic idea of shared online spaces rather than only static pages.
+- Room Workspace has become the central hub for voice, users, and mini-games.
+
+Voice System
+-
+- WebRTC voice room flow has been integrated into the VOXYN room experience.
+- Users can connect to voice channels, mute, deafen, and leave voice sessions.
+- Socket.IO signaling and WebRTC connection logic now form the real-time communication foundation.
+- Voice is treated as a core part of the room identity, not an extra side feature.
+
+Game System
+-
+- Game Library and GameStage have been added as the main game launcher flow.
+- v1.0 game scope is finalized with 3 games:
+  Tic Tac Toe
+  Falling Blocks
+  2048
+- Tic Tac Toe represents the multiplayer / turn-based game direction.
+- Falling Blocks represents the arcade / single-player game direction.
+- 2048 represents the puzzle / lightweight casual game direction.
+- Minesweeper and other future games are postponed to later versions.
+- Game cards, game launch flow, room drawer UI, and basic session presentation are now in place.
+- Watch / Rooms / Join concepts have been explored and partially structured, but full synchronized spectator gameplay is postponed.
+
+UI / Visual Design
+-
+- Continued moving the app away from a rough developer prototype toward a more premium interface.
+- Reworked several areas into a white frosted-glass style.
+- Improved cards, panels, buttons, rounded containers, spacing, shadows, and visual hierarchy.
+- The interface now has a more consistent VOXYN identity.
+- Advanced animation and motion polish are acknowledged as future improvements, but not required for v1.0.
+
+Engineering Notes
+-
+- The project now combines Vue 3, Vite, Node.js, Express, Socket.IO, WebRTC, Supabase, SMTP email, and Cloudflare Tunnel testing.
+- The architecture is still not final, but the current version successfully proves the full product concept.
+- Some features are intentionally left as v1.x / v2.0 work:
+  deeper game-state synchronization
+  stronger spectator mode
+  MySQL migration
+  Docker deployment
+  self-hosted backend/database structure
+  advanced motion design
+  additional games
+- v1.0 is not the final technical architecture, but it is the first complete VOXYN product milestone.
+
+Final v1.0 Summary
+-
+- VOXYN v1.0 is now a functional real-time voice room and mini-game social platform prototype.
+- The project has moved beyond a simple website and now demonstrates authentication, real-time rooms, WebRTC voice, game launching, profile flow, and polished UI direction.
+- Current priority shifts from adding new features to stabilizing, testing, documenting, and preparing the project for portfolio/resume use.
+- Future development will continue from this stable base instead of endlessly expanding the v1.0 scope.

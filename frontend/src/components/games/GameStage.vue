@@ -10,6 +10,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue"
 import GameLibrary from "./GameLibrary.vue"
 import TicTacToe from "./TicTacToe.vue"
 import FallingBlocks from "./FallingBlocks.vue"
+import Game2048 from "./Game2048.vue"
 
 /* =========================================================
    SECTION 2: Props / Emits
@@ -49,37 +50,44 @@ const activeRooms = ref([])
 const isLoadingRooms = ref(false)
 const roomsError = ref("")
 
+const activeSession = ref(null)
+const activeRole = ref("player")
+const activeSlotId = ref("")
+const syncedGameState = ref(null)
+
 let boundRoomsSocket = null
 
 /* =========================================================
    SECTION 4: Game Component Registry
    Purpose:
    - Central registry for playable game screens
-   - Add future games here only
-   Notes:
    - Registry key must match GameLibrary game.id
-   - If a game is not registered here, it falls back to Coming Soon
+   - If gameId is not registered here, GameStage shows Coming Soon
 ========================================================= */
 const gameComponentRegistry = {
   "tic-tac-toe": TicTacToe,
-  "falling-blocks": FallingBlocks
-  // "click-battle": ClickBattle
-  // "game-2048": Game2048
+  "falling-blocks": FallingBlocks,
+  "2048": Game2048,
 }
 
 const gameMetaRegistry = {
   "tic-tac-toe": {
     gameTitle: "Tic Tac Toe",
-    gameNumber: "Game 1",
-    players: "1–2 players",
-    ready: true
+    mode: "Multiplayer",
+    maxPlayers: 2,
   },
+
   "falling-blocks": {
     gameTitle: "Falling Blocks",
-    gameNumber: "Game 2",
-    players: "1 player",
-    ready: false
-  }
+    mode: "Single Player",
+    maxPlayers: 1,
+  },
+
+  "2048": {
+    gameTitle: "2048",
+    mode: "Single Player",
+    maxPlayers: 1,
+  },
 }
 
 let hasAppliedUrlGameLaunch = false
@@ -87,21 +95,42 @@ let hasAppliedUrlGameLaunch = false
 /* =========================================================
    SECTION 5: Active Game Computeds
 ========================================================= */
+const selectedGameId = computed(() => {
+  return selectedGame.value?.gameId || selectedGame.value?.id || ""
+})
+
 const selectedGameTitle = computed(() => {
-  return selectedGame.value?.gameTitle || ""
+  return (
+    selectedGame.value?.gameTitle ||
+    selectedGame.value?.title ||
+    gameMetaRegistry[selectedGameId.value]?.gameTitle ||
+    ""
+  )
 })
 
 const selectedGameMode = computed(() => {
-  return selectedGame.value?.mode || ""
+  return (
+    selectedGame.value?.mode ||
+    gameMetaRegistry[selectedGameId.value]?.mode ||
+    ""
+  )
 })
 
 const activeGameComponent = computed(() => {
-  if (!selectedGame.value?.gameId) return null
-  return gameComponentRegistry[selectedGame.value.gameId] || null
+  if (!selectedGameId.value) return null
+  return gameComponentRegistry[selectedGameId.value] || null
 })
 
 const isPlayableGame = computed(() => {
   return Boolean(activeGameComponent.value)
+})
+
+const isActiveGameReadOnly = computed(() => {
+  return (
+    selectedGame.value?.defaultRole === "spectator" ||
+    selectedGame.value?.defaultRole === "watcher" ||
+    activeRole.value !== "player"
+  )
 })
 
 const roomsDrawerTitle = computed(() => {
@@ -115,7 +144,7 @@ const liveRoomCount = computed(() => {
 })
 
 const selectedRoomsGameId = computed(() => {
-  return selectedRoomsGame.value?.gameId || ""
+  return selectedRoomsGame.value?.gameId || selectedRoomsGame.value?.id || ""
 })
 
 const hasActiveRooms = computed(() => {
@@ -162,6 +191,7 @@ function applyUrlGameLaunch() {
   }
 
   hasAppliedUrlGameLaunch = true
+  setupGameSession(selectedGame.value, defaultRole)
 }
 
 /* =========================================================
@@ -217,6 +247,8 @@ function getRoomLabel(room, index) {
 function bindRoomsSocket(nextSocket) {
   if (boundRoomsSocket && boundRoomsSocket !== nextSocket) {
     boundRoomsSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+    boundRoomsSocket.off("game:session-update", handleGameSessionUpdate)
+    boundRoomsSocket.off("game:state-update", handleGameStateUpdate)
   }
 
   if (!nextSocket) {
@@ -225,7 +257,13 @@ function bindRoomsSocket(nextSocket) {
   }
 
   nextSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+  nextSocket.off("game:session-update", handleGameSessionUpdate)
+  nextSocket.off("game:state-update", handleGameStateUpdate)
+
   nextSocket.on("game:active-rooms-update", handleActiveRoomsUpdate)
+  nextSocket.on("game:session-update", handleGameSessionUpdate)
+  nextSocket.on("game:state-update", handleGameStateUpdate)
+
   boundRoomsSocket = nextSocket
 }
 
@@ -234,6 +272,27 @@ function handleActiveRoomsUpdate(payload) {
   if (payload?.gameId !== selectedRoomsGameId.value) return
 
   activeRooms.value = normalizeRooms(payload)
+}
+
+function handleGameSessionUpdate(session) {
+  if (!selectedGameId.value) return
+  if (session?.gameId !== selectedGameId.value) return
+  if (session?.roomCode && session.roomCode !== props.roomCode) return
+
+  activeSession.value = session
+  syncedGameState.value = session?.gameState || null
+}
+
+function handleGameStateUpdate(payload) {
+  if (!selectedGameId.value) return
+  if (payload?.gameId !== selectedGameId.value) return
+
+  const nextSession = payload?.session || null
+
+  if (nextSession?.roomCode && nextSession.roomCode !== props.roomCode) return
+
+  activeSession.value = nextSession || activeSession.value
+  syncedGameState.value = payload?.gameState || nextSession?.gameState || null
 }
 
 function fetchActiveRooms(gameId = selectedRoomsGameId.value) {
@@ -259,6 +318,12 @@ function fetchActiveRooms(gameId = selectedRoomsGameId.value) {
 
       if (!response?.ok) {
         activeRooms.value = []
+
+        if (response?.error === "Invalid game id.") {
+          roomsError.value = ""
+          return
+        }
+
         roomsError.value = response?.error || "Failed to load active rooms."
         return
       }
@@ -267,6 +332,7 @@ function fetchActiveRooms(gameId = selectedRoomsGameId.value) {
     }
   )
 }
+
 
 function openGameRooms(payload) {
   selectedRoomsGame.value = payload
@@ -298,6 +364,7 @@ function launchRoomFromDrawer(room, role = "spectator") {
   if (!room?.roomCode || room.roomCode === props.roomCode) {
     selectedGame.value = nextGame
     isRoomsDrawerOpen.value = false
+    setupGameSession(nextGame, role)
     return
   }
 
@@ -320,12 +387,88 @@ function joinOpenRoom(room) {
    SECTION 8: Actions
 ========================================================= */
 function handleLaunchGame(payload) {
-  selectedGame.value = payload
+  const nextGame = {
+    ...payload,
+    defaultRole: payload?.defaultRole || "player",
+    watchRoomCode: payload?.watchRoomCode || props.roomCode,
+  }
+
+  selectedGame.value = nextGame
   isRoomsDrawerOpen.value = false
+
+  setupGameSession(nextGame, nextGame.defaultRole)
 }
 
 function backToLibrary() {
+  resetActiveSession()
   selectedGame.value = null
+}
+
+function resetActiveSession() {
+  activeSession.value = null
+  activeRole.value = "player"
+  activeSlotId.value = ""
+  syncedGameState.value = null
+}
+
+function normalizeServerRole(role) {
+  const value = String(role || "").toLowerCase()
+
+  if (value === "spectator" || value === "watcher" || value === "watch") {
+    return "spectator"
+  }
+
+  return "player"
+}
+
+function setupGameSession(payload, role = "player") {
+  const gameId = String(payload?.gameId || payload?.id || "").trim()
+
+  if (!gameId) return
+  if (!props.socket) return
+  if (!props.roomCode) return
+
+  props.socket.emit(
+    "game:join-session",
+    {
+      roomCode: props.roomCode,
+      gameId,
+      role,
+    },
+    (response) => {
+      if (!response?.ok) {
+        console.warn("[GameStage] Failed to setup game session:", response?.error)
+        return
+      }
+
+      activeRole.value = normalizeServerRole(response.role)
+      activeSlotId.value = response.slotId || ""
+      activeSession.value = response.session || null
+      syncedGameState.value = response.session?.gameState || null
+
+      fetchActiveRooms(gameId)
+    }
+  )
+}
+
+function syncGameState(nextState) {
+  if (!props.socket) return
+  if (!selectedGameId.value) return
+  if (activeRole.value !== "player") return
+
+  props.socket.emit(
+    "game:state-sync",
+    {
+      roomCode: props.roomCode,
+      gameId: selectedGameId.value,
+      gameState: nextState,
+    },
+    (response) => {
+      if (!response?.ok) {
+        console.warn("[GameStage] state sync failed:", response?.error)
+      }
+    }
+  )
 }
 
 watch(
@@ -346,7 +489,11 @@ watch(
 
 onBeforeUnmount(() => {
   if (!boundRoomsSocket) return
+
   boundRoomsSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
+  boundRoomsSocket.off("game:session-update", handleGameSessionUpdate)
+  boundRoomsSocket.off("game:state-update", handleGameStateUpdate)
+
   boundRoomsSocket = null
 })
 </script>
@@ -529,6 +676,12 @@ onBeforeUnmount(() => {
         :room-code="props.roomCode"
         :user="props.user"
         :socket="props.socket"
+        :session="activeSession"
+        :game-state="syncedGameState"
+        :role="activeRole"
+        :slot-id="activeSlotId"
+        :readonly="isActiveGameReadOnly"
+        @state-change="syncGameState"
         @back-to-library="backToLibrary"
     />
 
