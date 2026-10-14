@@ -11,6 +11,7 @@ import GameLibrary from "./GameLibrary.vue"
 import TicTacToe from "./TicTacToe.vue"
 import FallingBlocks from "./FallingBlocks.vue"
 import Game2048 from "./Game2048.vue"
+import Minesweeper from "./Minesweeper.vue"
 
 /* =========================================================
    SECTION 2: Props / Emits
@@ -54,6 +55,9 @@ const activeSession = ref(null)
 const activeRole = ref("player")
 const activeSlotId = ref("")
 const syncedGameState = ref(null)
+const gameSessionError = ref("")
+let minesJoinRequest = 0
+let minesJoinTimer = null
 
 let boundRoomsSocket = null
 
@@ -65,12 +69,17 @@ let boundRoomsSocket = null
    - If gameId is not registered here, GameStage shows Coming Soon
 ========================================================= */
 const gameComponentRegistry = {
+  "minesweeper": Minesweeper,
   "tic-tac-toe": TicTacToe,
   "falling-blocks": FallingBlocks,
   "2048": Game2048,
 }
 
 const gameMetaRegistry = {
+  "minesweeper": {
+    gameTitle: "Minesweeper", gameNumber: "Game 4", mode: "Single Player",
+    players: "1 player", maxPlayers: 1, ready: true,
+  },
   "tic-tac-toe": {
     gameTitle: "Tic Tac Toe",
     mode: "Multiplayer",
@@ -280,6 +289,7 @@ function handleGameSessionUpdate(session) {
   if (session?.roomCode && session.roomCode !== props.roomCode) return
 
   activeSession.value = session
+  if (session.gameId === "minesweeper") applyMinesweeperRole(session)
   syncedGameState.value = session?.gameState || null
 }
 
@@ -292,6 +302,7 @@ function handleGameStateUpdate(payload) {
   if (nextSession?.roomCode && nextSession.roomCode !== props.roomCode) return
 
   activeSession.value = nextSession || activeSession.value
+  if (nextSession?.gameId === "minesweeper") applyMinesweeperRole(nextSession)
   syncedGameState.value = payload?.gameState || nextSession?.gameState || null
 }
 
@@ -362,6 +373,7 @@ function launchRoomFromDrawer(room, role = "spectator") {
   }
 
   if (!room?.roomCode || room.roomCode === props.roomCode) {
+    leaveMinesweeperSession()
     selectedGame.value = nextGame
     isRoomsDrawerOpen.value = false
     setupGameSession(nextGame, role)
@@ -387,6 +399,7 @@ function joinOpenRoom(room) {
    SECTION 8: Actions
 ========================================================= */
 function handleLaunchGame(payload) {
+  leaveMinesweeperSession()
   const nextGame = {
     ...payload,
     defaultRole: payload?.defaultRole || "player",
@@ -405,6 +418,8 @@ function backToLibrary() {
 }
 
 function resetActiveSession() {
+  leaveMinesweeperSession()
+  gameSessionError.value = ""
   activeSession.value = null
   activeRole.value = "player"
   activeSlotId.value = ""
@@ -425,6 +440,10 @@ function setupGameSession(payload, role = "player") {
   const gameId = String(payload?.gameId || payload?.id || "").trim()
 
   if (!gameId) return
+  if (gameId === "minesweeper") {
+    setupMinesweeperSession(role)
+    return
+  }
   if (!props.socket) return
   if (!props.roomCode) return
 
@@ -449,6 +468,59 @@ function setupGameSession(payload, role = "player") {
       fetchActiveRooms(gameId)
     }
   )
+}
+
+/* Minesweeper uses the existing session channel with server-owned rules. */
+function applyMinesweeperRole(session) {
+  const slot = session?.playerSlots?.find(item => item.player?.socketId === props.socket?.id)
+  activeRole.value = slot ? "player" : "spectator"
+  activeSlotId.value = slot?.slotId || ""
+}
+
+function leaveMinesweeperSession() {
+  minesJoinRequest++
+  clearTimeout(minesJoinTimer)
+  if (selectedGameId.value !== "minesweeper") return
+  if (props.socket?.connected) {
+    props.socket.emit("game:leave-session", { roomCode: props.roomCode, gameId: "minesweeper" })
+  }
+}
+
+function setupMinesweeperSession(role = "player") {
+  const request = ++minesJoinRequest
+  clearTimeout(minesJoinTimer)
+  gameSessionError.value = ""
+  activeRole.value = "none"
+  if (!props.socket?.connected || !props.roomCode) {
+    gameSessionError.value = "Connect to the room, then click Rejoin game."
+    return
+  }
+  minesJoinTimer = setTimeout(() => {
+    if (request === minesJoinRequest) gameSessionError.value = "The game session did not respond. Click Rejoin game to retry."
+  }, 7000)
+  props.socket.emit("game:join-session", { roomCode: props.roomCode, gameId: "minesweeper", role }, response => {
+    if (request !== minesJoinRequest || selectedGameId.value !== "minesweeper") return
+    clearTimeout(minesJoinTimer)
+    if (!response?.ok) {
+      gameSessionError.value = response?.error || "Could not join the game."
+      return
+    }
+    gameSessionError.value = ""
+    activeSession.value = response.session
+    syncedGameState.value = response.session?.gameState || null
+    applyMinesweeperRole(response.session)
+    fetchActiveRooms("minesweeper")
+  })
+}
+
+function retryMinesweeperSession() {
+  if (selectedGameId.value === "minesweeper") setupMinesweeperSession(selectedGame.value?.defaultRole || "player")
+}
+
+function takeMinesweeperSeat() {
+  if (selectedGameId.value !== "minesweeper") return
+  selectedGame.value = { ...selectedGame.value, defaultRole: "player" }
+  setupMinesweeperSession("player")
 }
 
 function syncGameState(nextState) {
@@ -488,6 +560,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  leaveMinesweeperSession()
   if (!boundRoomsSocket) return
 
   boundRoomsSocket.off("game:active-rooms-update", handleActiveRoomsUpdate)
@@ -621,7 +694,14 @@ onBeforeUnmount(() => {
               {{ getRoomLabel(room, index) }}
             </div>
 
-            <div class="matchup-row">
+            <div v-if="selectedRoomsGameId === 'minesweeper'" class="matchup-row">
+              <div class="player-preview">
+                <div class="player-orb blue">{{ getPlayerInitial(getPlayerSlot(room, 0), '+') }}</div>
+                <span>{{ getPlayerName(getPlayerSlot(room, 0), 'Open Slot') }}</span>
+              </div>
+              <strong>SOLO</strong>
+            </div>
+            <div v-else class="matchup-row">
               <div class="player-preview">
                 <div class="player-orb blue">
                   {{ getPlayerInitial(getPlayerSlot(room, 0), 'A') }}
@@ -669,6 +749,7 @@ onBeforeUnmount(() => {
 
     <component
         :is="activeGameComponent"
+        :key="selectedGameId"
         v-else-if="isPlayableGame"
         :mode="selectedGameMode"
         :default-role="selectedGame?.defaultRole || 'player'"
@@ -681,6 +762,9 @@ onBeforeUnmount(() => {
         :role="activeRole"
         :slot-id="activeSlotId"
         :readonly="isActiveGameReadOnly"
+        :session-error="gameSessionError"
+        @retry-session="retryMinesweeperSession"
+        @take-seat="takeMinesweeperSeat"
         @state-change="syncGameState"
         @back-to-library="backToLibrary"
     />

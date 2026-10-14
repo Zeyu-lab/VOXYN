@@ -341,7 +341,15 @@ async function handleAvatarUpload(event) {
 
     const user = data.user
     const metadata = user.user_metadata || {}
-
+    if (user.auth_source === "local") {
+      const result = await supabase.auth.uploadLocalAvatar(file)
+      if (result.error) throw result.error
+        const updated = result.data.user.user_metadata
+        avatarUrl.value = updated.avatar_url || ""
+        avatarUpdatedAt.value = updated.avatar_updated_at || ""
+        saveMessage.value = "Avatar updated."
+      return
+    }
     const oldAvatarPath = metadata.avatar_path || ""
     const filePath = `${user.id}/avatar.${fileExt}`
 
@@ -467,13 +475,12 @@ function goDashboard() {
 }
 
 async function signOut() {
-  try {
-    await supabase.auth.signOut()
-  } catch (err) {
-    console.error("Sign out failed:", err)
+  const { error } = await supabase.auth.signOut()
+  if (error) {
+    saveMessage.value = error.message || "Could not log out. Please try again."
+    return
   }
-
-  router.push("/")
+  await router.push("/")
 }
 </script>
 

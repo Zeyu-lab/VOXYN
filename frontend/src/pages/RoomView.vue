@@ -10,6 +10,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase, socket } from "../lib/supabaseClient"
+import { roomService } from "../services/roomService.js"
 import { useVoiceRoom } from "../webrtc/useVoiceRoom.js"
 console.log("VOXYN v0.52 RoomView build loaded")
 import GameStage from "../components/games/GameStage.vue"
@@ -51,6 +52,7 @@ const members = ref([])
    - Store online users from Socket.IO
 ========================================================= */
 const socketConnected = ref(false)
+const socketRoomJoined = ref(false)
 const onlineUsers = ref([])
 
 /* =========================================================
@@ -512,6 +514,10 @@ async function toggleGameScreenHeadphones() {
    - Auto-connect default Lobby after room socket is ready
 ========================================================= */
 async function joinVoiceChannel(channelName = defaultVoiceChannel, options = {}) {
+  if (!socketRoomJoined.value) {
+    voiceStatusMessage.value = "Wait for the room connection before enabling voice."
+    return
+  }
   const targetChannel = channelName || defaultVoiceChannel
 
   selectedVoiceChannel.value = targetChannel
@@ -1075,99 +1081,45 @@ async function loadRoomPage() {
   hasManuallyLeftVoice.value = false
   voiceJoinLoading.value = false
   voiceLeaveLoading.value = false
-  voiceStatusMessage.value = ""
   selectedVoiceChannel.value = defaultVoiceChannel
-  
-  const { data: sessionData, error: sessionError } =
-    await supabase.auth.getSession()
-
-  if (sessionError) {
-    console.error("Session error:", sessionError.message)
-
-    localStorage.clear()
-    sessionStorage.clear()
-
+  socketRoomJoined.value = false
+  try {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) throw error
+    if (!data.session) {
+      await router.push("/login")
+      return
+    }
+    user.value = data.session.user
+    room.value = await roomService.get(roomCode.value)
+    if (!await ensureRoomMembership()) return
+    await loadRoomMembers()
+    connectSocketRoom()
+  } catch (error) {
+    errorMessage.value = error.message || "Could not load room."
+  } finally {
     loading.value = false
-    router.push("/login")
-    return
   }
-
-  if (!sessionData.session) {
-    loading.value = false
-    router.push("/login")
-    return
-  }
-
-  user.value = sessionData.session.user
-
-  const { data: roomData, error: roomError } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("room_code", roomCode.value)
-    .single()
-
-  if (roomError || !roomData) {
-    errorMessage.value = "Room not found."
-    loading.value = false
-    return
-  }
-
-  room.value = roomData
-
-  await ensureRoomMembership()
-  await loadRoomMembers()
-
-  loading.value = false
-
-  connectSocketRoom()
 }
-
 /* =========================================================
    SECTION 8: Room Membership
-   Purpose:
-   - Add current user into room_members
-   - Owner should already be added by database trigger
 ========================================================= */
 async function ensureRoomMembership() {
-  if (!room.value || !user.value) return
-
-  const { data: existingMember } = await supabase
-    .from("room_members")
-    .select("*")
-    .eq("room_id", room.value.id)
-    .eq("user_id", user.value.id)
-    .maybeSingle()
-
-  if (existingMember) return
-
-  const { error } = await supabase
-    .from("room_members")
-    .insert({
-      room_id: room.value.id,
-      user_id: user.value.id,
-      member_role: "member"
-    })
-
-  if (error) {
+  if (!room.value || !user.value) return false
+  try {
+    const result = await roomService.join(roomCode.value)
+    room.value = result.room
+    members.value = result.members
+    return true
+  } catch (error) {
     errorMessage.value = error.message || "Could not join room."
+    return false
   }
 }
 
 async function loadRoomMembers() {
   if (!room.value) return
-
-  const { data, error } = await supabase
-    .from("room_members")
-    .select("*")
-    .eq("room_id", room.value.id)
-    .order("joined_at", { ascending: true })
-
-  if (error) {
-    errorMessage.value = error.message
-    return
-  }
-
-  members.value = data || []
+  members.value = await roomService.members(roomCode.value)
 }
 
 /* =========================================================
@@ -1217,50 +1169,26 @@ function backToDashboard() {
    - Redirect to the new room
 ========================================================= */
 async function createNewRoomFromWorkspace() {
+  if (actionLoading.value) return
   errorMessage.value = ""
   successMessage.value = ""
-
   if (!user.value) {
     errorMessage.value = "You must be logged in first."
     return
   }
-
   actionLoading.value = true
-
-  const generatedCode = generateRoomCode()
-  const cleanRoomName = newRoomName.value.trim() || "New VOXYN Room"
-
-  const { error: deleteError } = await supabase
-    .from("rooms")
-    .delete()
-    .eq("owner_id", user.value.id)
-
-  if (deleteError) {
+  try {
+    if (hasJoinedVoice.value) await leaveVoiceChannel()
+    cleanupVoiceRoom()
+    const created = await roomService.create(newRoomName.value.trim() || "New VOXYN Room", newMaxMembers.value)
+    leaveSocketRoom(true)
+    await router.push(`/room/${created.room_code}`)
+    await loadRoomPage()
+  } catch (error) {
+    errorMessage.value = error.message || "Could not create room."
+  } finally {
     actionLoading.value = false
-    errorMessage.value = deleteError.message
-    return
   }
-
-  const { error } = await supabase
-    .from("rooms")
-    .insert({
-      room_code: generatedCode,
-      room_name: cleanRoomName,
-      owner_id: user.value.id,
-      max_members: newMaxMembers.value
-    })
-
-  actionLoading.value = false
-
-  if (error) {
-    errorMessage.value = error.message
-    return
-  }
-
-  leaveSocketRoom(false)
-
-  router.push(`/room/${generatedCode}`)
-  await loadRoomPage()
 }
 
 async function leaveCurrentRoom() {
@@ -1309,6 +1237,8 @@ function connectSocketRoom() {
 function registerSocketListeners() {
   socket.off("connect", handleSocketConnect)
   socket.off("disconnect", handleSocketDisconnect)
+  socket.off("connect_error", handleSocketConnectError)
+  socket.off("room:closed", handleRoomClosed)
   socket.off("room:history", handleRoomHistory)
   socket.off("chat:new", handleNewChatMessage)
   socket.off("room:users", handleRoomUsers)
@@ -1321,6 +1251,8 @@ function registerSocketListeners() {
 
   socket.on("connect", handleSocketConnect)
   socket.on("disconnect", handleSocketDisconnect)
+  socket.on("connect_error", handleSocketConnectError)
+  socket.on("room:closed", handleRoomClosed)
   socket.on("room:history", handleRoomHistory)
   socket.on("chat:new", handleNewChatMessage)
   socket.on("room:users", handleRoomUsers)
@@ -1354,6 +1286,7 @@ function handleRoomUsers(users) {
 }
 
 async function handleIncomingVoiceOffer(payload) {
+  if (!hasJoinedVoice.value && !voiceJoinLoading.value) return
   try {
     await handleVoiceOffer(
       payload?.fromSocketId,
@@ -1401,9 +1334,23 @@ function handleSocketConnect() {
 
 function handleSocketDisconnect() {
   socketConnected.value = false
+  socketRoomJoined.value = false
+}
+
+function handleSocketConnectError(error) {
+  socketRoomJoined.value = false
+  errorMessage.value = error.message || "Could not connect to the room server."
+}
+
+function handleRoomClosed() {
+  if (actionLoading.value && isOwner.value) return
+  cleanupVoiceRoom()
+  leaveSocketRoom(true)
+  router.replace("/dashboard")
 }
 
 function joinSocketRoom() {
+  socketRoomJoined.value = false
   socket.emit(
     "room:join",
     {
@@ -1431,6 +1378,7 @@ function joinSocketRoom() {
         return
       }
 
+      socketRoomJoined.value = true
       voiceStatusMessage.value =
         `You are in ${selectedVoiceChannel.value}. Click Enable Voice to talk.`
     }
@@ -1466,12 +1414,15 @@ function handleSystemMessage(systemMessage) {
 }
 
 function leaveSocketRoom(disconnectSocket = false) {
+  socketRoomJoined.value = false
   if (socket.connected) {
     socket.emit("room:leave")
   }
 
   socket.off("connect", handleSocketConnect)
   socket.off("disconnect", handleSocketDisconnect)
+  socket.off("connect_error", handleSocketConnectError)
+  socket.off("room:closed", handleRoomClosed)
   socket.off("room:history", handleRoomHistory)
   socket.off("chat:new", handleNewChatMessage)
   socket.off("room:users", handleRoomUsers)
@@ -1958,6 +1909,7 @@ function formatChatTime(timestamp) {
               ====================================================== -->
               <div class="stage-two-game-scroll-shell">
                 <GameStage
+                  v-if="socketRoomJoined"
                   :is-stage-two="isGameFocusMode"
                   :room-code="roomCode"
                   :room-title="roomTitle"

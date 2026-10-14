@@ -9,7 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase } from "../lib/supabaseClient"
-
+import { roomService } from "../services/roomService.js"
 /* =========================================================
    SECTION 2: Router
 ========================================================= */
@@ -411,121 +411,55 @@ function formatRoomTime(value) {
 ========================================================= */
 async function loadRecentRooms() {
   if (!user.value) return
-
-  const { data, error } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("owner_id", user.value.id)
-    .order("created_at", { ascending: false })
-    .limit(5)
-
-  if (error) {
-    activityFeed.value.unshift({
-      title: "Recent rooms unavailable",
-      detail: error.message || "Check your Supabase rooms table.",
-      time: "Now"
-    })
-    return
+  try {
+    recentRooms.value = await roomService.listOwned()
+  } catch (error) {
+    errorMessage.value = error.message || "Could not load your rooms."
   }
-
-  recentRooms.value = data || []
 }
-
 /* =========================================================
    SECTION 10: Create Room
 ========================================================= */
 async function createRoom() {
+  if (actionLoading.value) return
   errorMessage.value = ""
   successMessage.value = ""
-
   if (!user.value) {
     errorMessage.value = "You must be logged in first."
     return
   }
-
   actionLoading.value = true
-
-  const newRoomCode = generateRoomCode()
-  const cleanRoomName = roomName.value.trim() || "Untitled Room"
-
-  const { error: deleteError } = await supabase
-    .from("rooms")
-    .delete()
-    .eq("owner_id", user.value.id)
-
-  if (deleteError) {
+  try {
+    const created = await roomService.create(roomName.value.trim() || "Untitled Room", maxMembers.value)
+    await router.push(`/room/${created.room_code}`)
+  } catch (error) {
+    errorMessage.value = error.message || "Could not create room."
+  } finally {
     actionLoading.value = false
-    errorMessage.value = deleteError.message
-    return
   }
-
-  const roomPayload = {
-    room_code: newRoomCode,
-    room_name: cleanRoomName,
-    owner_id: user.value.id,
-    max_members: maxMembers.value
-  }
-
-  const { error } = await supabase
-    .from("rooms")
-    .insert(roomPayload)
-
-  actionLoading.value = false
-
-  if (error) {
-    errorMessage.value = error.message
-    return
-  }
-
-  activityFeed.value.unshift({
-    title: `Room ${newRoomCode} created`,
-    detail: `${cleanRoomName} replaced your previous room.`,
-    time: "Now"
-  })
-
-  successMessage.value = `Room ${newRoomCode} created.`
-
-  await loadRecentRooms()
-
-  router.push(`/room/${newRoomCode}`)
 }
 
 /* =========================================================
    SECTION 11: Join Room
 ========================================================= */
 async function joinRoom() {
+  if (actionLoading.value) return
   errorMessage.value = ""
   successMessage.value = ""
-
   const code = joinCode.value.trim().toUpperCase()
-
   if (!code) {
     errorMessage.value = "Please enter a room code."
     return
   }
-
   actionLoading.value = true
-
-  const { data, error } = await supabase
-    .from("rooms")
-    .select("*")
-    .eq("room_code", code)
-    .single()
-
-  actionLoading.value = false
-
-  if (error || !data) {
-    errorMessage.value = "Room not found."
-    return
+  try {
+    const joined = await roomService.join(code)
+    await router.push(`/room/${joined.room.room_code}`)
+  } catch (error) {
+    errorMessage.value = error.message || "Could not join room."
+  } finally {
+    actionLoading.value = false
   }
-
-  activityFeed.value.unshift({
-    title: `Joining ${code}`,
-    detail: "Opening room workspace.",
-    time: "Now"
-  })
-
-  router.push(`/room/${code}`)
 }
 
 /* =========================================================
@@ -598,57 +532,36 @@ async function copyLatestRoomInvite() {
     errorMessage.value = "Could not copy invite link."
   }
 }
-
 /* =========================================================
    SECTION 13: Delete Room
 ========================================================= */
 async function deleteRoom(room) {
+  if (actionLoading.value || !room?.room_code) return
+  if (!window.confirm(`Delete room ${room.room_code}? This cannot be undone.`)) return
   errorMessage.value = ""
   successMessage.value = ""
-
-  if (!room?.id) {
-    errorMessage.value = "Room data is missing."
-    return
-  }
-
-  const confirmed = window.confirm(
-    `Delete room ${room.room_code}? This cannot be undone.`
-  )
-
-  if (!confirmed) return
-
   actionLoading.value = true
-
-  const { error } = await supabase
-    .from("rooms")
-    .delete()
-    .eq("id", room.id)
-    .eq("owner_id", user.value.id)
-
-  actionLoading.value = false
-
-  if (error) {
-    errorMessage.value = error.message
-    return
+  try {
+    await roomService.remove(room.room_code)
+    successMessage.value = `Room ${room.room_code} deleted.`
+    await loadRecentRooms()
+  } catch (error) {
+    errorMessage.value = error.message || "Could not delete room."
+  } finally {
+    actionLoading.value = false
   }
-
-  successMessage.value = `Room ${room.room_code} deleted.`
-
-  activityFeed.value.unshift({
-    title: `Room ${room.room_code} deleted`,
-    detail: "The old room and its members were removed.",
-    time: "Now"
-  })
-
-  await loadRecentRooms()
 }
 
 /* =========================================================
    SECTION 14: Sign Out
 ========================================================= */
 async function signOut() {
-  await supabase.auth.signOut()
-  router.push("/")
+  const { error } = await supabase.auth.signOut()
+  if (error) {
+    errorMessage.value = error.message || "Could not log out."
+    return
+  }
+  await router.push("/")
 }
 </script>
 

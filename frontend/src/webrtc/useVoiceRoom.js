@@ -28,47 +28,59 @@ export function useVoiceRoom() {
   let analyser = null
   let speakingAnimationFrame = null
   const pendingIceCandidates = new Map()
+  const peerTasks = new Map()
+  let audioStartPromise = null
+  let voiceGeneration = 0
+
+  function queuePeerOperation(socketId, operation) {
+    const previous = peerTasks.get(socketId) || Promise.resolve()
+    const job = previous.catch(() => {}).then(operation)
+    peerTasks.set(socketId, job)
+    void job.finally(() => {
+      if (peerTasks.get(socketId) === job) peerTasks.delete(socketId)
+    }).catch(() => {})
+    return job
+  }
 
   /* =========================================================
      SECTION 2: Local Microphone
   ========================================================= */
   async function startLocalAudio() {
-    try {
-      voiceError.value = ""
-
-      if (localStream.value) {
-        isVoiceReady.value = true
-        return localStream.value
-      }
-
-      localStream.value = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: false,
-          channelCount: 1
-        },
-        video: false
-      })
-
-      localStream.value.getAudioTracks().forEach((track) => {
-        track.enabled = isMicOn.value
-      })
-
+    if (localStream.value) {
       isVoiceReady.value = true
-      startSpeakingDetection()
-
-      console.log("VOXYN voice: microphone ready")
-
       return localStream.value
-    } catch (error) {
-      console.error("VOXYN voice: microphone error", error)
-
-      voiceError.value = "Microphone permission was denied."
-      isVoiceReady.value = false
-
-      return null
     }
+    if (audioStartPromise) return audioStartPromise
+    const generation = voiceGeneration
+    const operation = (async () => {
+      try {
+        voiceError.value = ""
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false, channelCount: 1 },
+          video: false
+        })
+        if (generation !== voiceGeneration) {
+          stream.getTracks().forEach(track => track.stop())
+          return null
+        }
+        localStream.value = stream
+        stream.getAudioTracks().forEach(track => { track.enabled = isMicOn.value })
+        isVoiceReady.value = true
+        startSpeakingDetection()
+        return stream
+      } catch (error) {
+        if (generation === voiceGeneration) {
+          voiceError.value = "Could not access the microphone. Check its permissions."
+          isVoiceReady.value = false
+        }
+        return null
+      }
+    })()
+    audioStartPromise = operation
+    void operation.finally(() => {
+      if (audioStartPromise === operation) audioStartPromise = null
+    })
+    return operation
   }
 
   /* =========================================================
@@ -213,20 +225,28 @@ export function useVoiceRoom() {
     }
 
     peerConnection.onconnectionstatechange = () => {
-      console.log(
-        "VOXYN voice: peer state",
-        targetSocketId,
-        peerConnection.connectionState
-      )
-
-      if (
-        peerConnection.connectionState === "failed" ||
-        peerConnection.connectionState === "disconnected" ||
-        peerConnection.connectionState === "closed"
-      ) {
-        removePeerConnection(targetSocketId)
-      }
+    // Ignore events from an old connection.
+    if (peerConnections.value[targetSocketId] !== peerConnection) {
+      return
     }
+
+    const state = peerConnection.connectionState
+
+    console.log("VOXYN voice: peer state", targetSocketId, state)
+
+    // Allow a temporarily disconnected connection to recover.
+    if (state === "disconnected") {
+      console.warn(
+        "VOXYN voice: connection interrupted; waiting for recovery",
+        targetSocketId
+      )
+      return
+    }
+
+  if (state === "failed" || state === "closed") {
+    removePeerConnection(targetSocketId)
+  }
+}
 
     peerConnections.value = {
       ...peerConnections.value,
@@ -253,95 +273,66 @@ export function useVoiceRoom() {
   /* =========================================================
      SECTION 6.1: Create Offer
      Purpose:
-     - Start WebRTC connection to another voice user
+     - Serialize SDP operations for each peer
   ========================================================= */
   async function connectToPeer(targetSocketId, socket) {
     if (!targetSocketId || !socket?.connected) return null
-
-    const stream = await startLocalAudio()
-
-    if (!stream) return null
-
-    const peerConnection = createPeerConnection(targetSocketId, socket)
-
-    if (peerConnection.localDescription) {
+    const generation = voiceGeneration
+    return queuePeerOperation(targetSocketId, async () => {
+      if (generation !== voiceGeneration || !socket.connected) return null
+      const stream = await startLocalAudio()
+      if (!stream || generation !== voiceGeneration || !socket.connected) return null
+      const peerConnection = createPeerConnection(targetSocketId, socket)
+      if (peerConnection.localDescription || peerConnection.signalingState !== "stable") return peerConnection
+      const offer = await peerConnection.createOffer()
+      if (generation !== voiceGeneration || peerConnections.value[targetSocketId] !== peerConnection || peerConnection.signalingState !== "stable") return null
+      await peerConnection.setLocalDescription(offer)
+      if (generation !== voiceGeneration || peerConnection.signalingState === "closed") return null
+      socket.emit("voice:offer", { targetSocketId, offer: peerConnection.localDescription })
       return peerConnection
-    }
-
-    const offer = await peerConnection.createOffer()
-    await peerConnection.setLocalDescription(offer)
-
-    socket.emit("voice:offer", {
-      targetSocketId,
-      offer: peerConnection.localDescription
     })
-
-    console.log("VOXYN voice: offer sent", targetSocketId)
-
-    return peerConnection
   }
 
   /* =========================================================
      SECTION 6.2: Handle Offer
-     Purpose:
-     - Receive offer from another user
-     - Create and send answer
   ========================================================= */
   async function handleVoiceOffer(fromSocketId, offer, socket) {
     if (!fromSocketId || !offer || !socket?.connected) return
-
-    const stream = await startLocalAudio()
-
-    if (!stream) return
-
-    const peerConnection = createPeerConnection(fromSocketId, socket)
-
-    if (peerConnection.signalingState !== "stable") {
-      await peerConnection
-        .setLocalDescription({ type: "rollback" })
-        .catch(() => {})
-    }
-
-    await peerConnection.setRemoteDescription(
-      new RTCSessionDescription(offer)
-    )
-
-    await flushPendingIceCandidates(fromSocketId, peerConnection)
-
-    const answer = await peerConnection.createAnswer()
-    await peerConnection.setLocalDescription(answer)
-
-    socket.emit("voice:answer", {
-      targetSocketId: fromSocketId,
-      answer: peerConnection.localDescription
+    const generation = voiceGeneration
+    return queuePeerOperation(fromSocketId, async () => {
+      if (generation !== voiceGeneration || !socket.connected) return
+      const stream = await startLocalAudio()
+      if (!stream || generation !== voiceGeneration || !socket.connected) return
+      const peerConnection = createPeerConnection(fromSocketId, socket)
+      if (peerConnection.signalingState !== "stable") {
+        // The higher socket ID yields if both peers made an offer.
+        if (socket.id < fromSocketId) return
+        await peerConnection.setLocalDescription({ type: "rollback" })
+      }
+      if (generation !== voiceGeneration || peerConnection.signalingState === "closed") return
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+      await flushPendingIceCandidates(fromSocketId, peerConnection)
+      const answer = await peerConnection.createAnswer()
+      if (generation !== voiceGeneration || peerConnection.signalingState === "closed") return
+      await peerConnection.setLocalDescription(answer)
+      if (generation === voiceGeneration && socket.connected) {
+        socket.emit("voice:answer", { targetSocketId: fromSocketId, answer: peerConnection.localDescription })
+      }
     })
-
-    console.log("VOXYN voice: answer sent", fromSocketId)
   }
 
   /* =========================================================
      SECTION 6.3: Handle Answer
-     Purpose:
-     - Complete WebRTC connection after offer
   ========================================================= */
   async function handleVoiceAnswer(fromSocketId, answer) {
     if (!fromSocketId || !answer) return
-
-    const peerConnection = peerConnections.value[fromSocketId]
-
-    if (!peerConnection) return
-
-    if (peerConnection.signalingState === "stable") {
-      return
-    }
-
-    await peerConnection.setRemoteDescription(
-      new RTCSessionDescription(answer)
-    )
-
-    await flushPendingIceCandidates(fromSocketId, peerConnection)
-
-    console.log("VOXYN voice: answer received", fromSocketId)
+    const generation = voiceGeneration
+    return queuePeerOperation(fromSocketId, async () => {
+      const peerConnection = peerConnections.value[fromSocketId]
+      if (!peerConnection || generation !== voiceGeneration || peerConnection.signalingState !== "have-local-offer") return
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+      await flushPendingIceCandidates(fromSocketId, peerConnection)
+    })
   }
 
   /* =========================================================
@@ -394,7 +385,7 @@ export function useVoiceRoom() {
       return (
         voiceUser?.socketId &&
         voiceUser.socketId !== currentSocketId &&
-        (voiceUser.voiceChannel || "Lobby") === currentVoiceChannel
+        voiceUser.voiceChannel === currentVoiceChannel
       )
     })
 
@@ -438,12 +429,16 @@ export function useVoiceRoom() {
     peerConnections.value = nextPeerConnections
     remoteStreams.value = nextRemoteStreams
     pendingIceCandidates.delete(targetSocketId)
+    peerTasks.delete(targetSocketId)
   }
 
   /* =========================================================
      SECTION 7: Cleanup
   ========================================================= */
   function cleanupVoiceRoom() {
+    voiceGeneration += 1
+    audioStartPromise = null
+    peerTasks.clear()
     if (speakingAnimationFrame) {
       cancelAnimationFrame(speakingAnimationFrame)
       speakingAnimationFrame = null

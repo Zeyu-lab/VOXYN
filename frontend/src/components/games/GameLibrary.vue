@@ -66,52 +66,9 @@ const games = [
     compactIcon: "✦",
     players: "1 player",
     modes: ["Single Player"],
-    ready: false
+    ready: true
   },
-  {
-    id: "blackjack",
-    number: "Game 5",
-    title: "Blackjack",
-    subtitle: "Hit, stand, and beat the dealer.",
-    cover: "chess",
-    compactIcon: "21",
-    players: "1–4 players",
-    modes: ["AI", "Multiplayer"],
-    ready: false
-  },
-  {
-    id: "chess",
-    number: "Game 6",
-    title: "Chess",
-    subtitle: "Classic board strategy for serious duels.",
-    cover: "orbit",
-    compactIcon: "♟",
-    players: "1–2 players",
-    modes: ["AI", "Multiplayer"],
-    ready: false
-  },
-  {
-    id: "word-battle",
-    number: "Game 7",
-    title: "Word Battle",
-    subtitle: "Fast typing, quick thinking, party pressure.",
-    cover: "word",
-    compactIcon: "Aa",
-    players: "2–8 players",
-    modes: ["Multiplayer"],
-    ready: false
-  },
-  {
-    id: "party-quiz",
-    number: "Game 8",
-    title: "Party Quiz",
-    subtitle: "Answer fast and compete with the room.",
-    cover: "quiz",
-    compactIcon: "?",
-    players: "2–8 players",
-    modes: ["AI", "Multiplayer"],
-    ready: false
-  }
+
 ]
 
 /* =========================================================

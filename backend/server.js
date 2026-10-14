@@ -12,6 +12,8 @@ const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 const { createClient } = require("@supabase/supabase-js");
 const { Server } = require("socket.io");
+const fs = require("fs");
+const minesweeper = require("./Minesweeper-temp");
 
 require("dotenv").config();
 
@@ -69,7 +71,7 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: "3mb" }));
 
 
 /* =========================================================
@@ -484,117 +486,6 @@ app.post("/api/auth/signup/verify", async (req, res) => {
     });
   }
 });
-
-/* =========================================================
-   SECTION 3.2: Auth Signup Beta Access Route - VOXYN v0.754
-   Purpose:
-   - Temporary fallback signup path for approved beta testers
-   - Does not require email OTP
-   - Still verifies approval through Supabase beta_invites table
-   - Creates Supabase Auth user with email_confirm: true
-========================================================= */
-
-app.post("/api/auth/signup/beta-access", async (req, res) => {
-  try {
-    const email = normalizeEmail(req.body.email);
-    const password = String(req.body.password || "");
-    const username = String(req.body.username || "").trim();
-
-    if (!isValidEmail(email)) {
-      return res.status(400).json({
-        message: "Please enter a valid email.",
-      });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({
-        message: "Password must be at least 6 characters.",
-      });
-    }
-
-    const displayName =
-      username.length >= 2 && username.length <= 24
-        ? username
-        : email.split("@")[0];
-
-    const alreadyExists = await emailExistsInAuth(email);
-
-    if (alreadyExists) {
-      return res.status(409).json({
-        message: "This email is already registered. Please login instead.",
-      });
-    }
-
-    const { data: invite, error: inviteError } = await supabaseAdmin
-      .from("beta_invites")
-      .select("id, email, used_at")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (inviteError) {
-      console.error("[Beta Access] invite check error:", inviteError.message);
-
-      return res.status(500).json({
-        message: "Failed to check beta access.",
-      });
-    }
-
-    if (!invite) {
-      return res.status(403).json({
-        message: "This email is not approved for beta access.",
-      });
-    }
-
-    if (invite.used_at) {
-      return res.status(409).json({
-        message: "This beta access has already been used.",
-      });
-    }
-
-    const { data: createdUser, error: createUserError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          display_name: displayName,
-          status_message: "Ready to connect.",
-          signup_method: "beta_access",
-        },
-      });
-
-    if (createUserError) {
-      console.error("[Beta Access] create user error:", createUserError.message);
-
-      return res.status(400).json({
-        message: createUserError.message || "Failed to create beta account.",
-      });
-    }
-
-    const { error: markUsedError } = await supabaseAdmin
-      .from("beta_invites")
-      .update({
-        used_at: new Date().toISOString(),
-      })
-      .eq("id", invite.id);
-
-    if (markUsedError) {
-      console.error("[Beta Access] mark used error:", markUsedError.message);
-    }
-
-    return res.json({
-      message: "Beta account created successfully.",
-      userId: createdUser.user?.id,
-    });
-  } catch (error) {
-    console.error("[Beta Access] signup error:", error);
-
-    return res.status(500).json({
-      message: "Server error while creating beta account.",
-    });
-  }
-});
-
 /* =========================================================
    SECTION 4: HTTP Server + Socket.IO Setup
    Purpose:
@@ -693,6 +584,12 @@ function cleanEmptyRoom(roomCode) {
     rooms.delete(roomCode);
   }
 }
+require("./localPlayer")({
+  app,
+  io,
+  supabaseAdmin,
+  liveRooms: rooms,
+});
 
 /* =========================================================
    SECTION 5.1: Voice Channel Helpers
@@ -718,6 +615,10 @@ function normalizeVoiceChannel(channel) {
    - Allow both multiplayer games and single-player watched games
 ========================================================= */
 const GAME_CONFIGS = {
+  "minesweeper": {
+    gameId: "minesweeper", title: "Minesweeper", maxPlayers: 1,
+    playerSlots: ["P1"], allowSpectators: true, mode: "solo-live",
+  },
   "tic-tac-toe": {
     gameId: "tic-tac-toe",
     title: "Tic Tac Toe",
@@ -751,6 +652,9 @@ function getGameConfig(gameId) {
 }
 
 function createInitialGameState(gameId) {
+  if (gameId === "minesweeper") {
+    return minesweeper.publicState(minesweeper.createGame());
+  }
   if (gameId === "tic-tac-toe") {
     return {
       board: Array(9).fill(null),
@@ -858,7 +762,12 @@ function getOrCreateGameSession(roomCode, gameId) {
     });
   }
 
-  return room.gameSessions.get(gameId);
+  const session = room.gameSessions.get(gameId);
+  if (gameId === "minesweeper" && !session.minesweeper) {
+    session.minesweeper = minesweeper.createGame();
+    session.gameState = minesweeper.publicState(session.minesweeper);
+  }
+  return session;
 }
 
 function serializeParticipant(participant) {
@@ -877,6 +786,9 @@ function serializeParticipant(participant) {
 function serializeGameSession(session) {
   if (!session) return null;
 
+  if (session.gameId === "minesweeper" && session.minesweeper) {
+    session.gameState = minesweeper.publicState(session.minesweeper);
+  }
   const occupiedPlayers = session.playerSlots.filter((slot) => slot.socketId);
 
   return {
@@ -1154,7 +1066,7 @@ function emitActiveGameRoomsUpdate(gameId) {
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
 
-  /* =====================================================
+    /* =====================================================
     SECTION 6.1: Join Room
     Purpose:
     - User joins a room by roomCode
@@ -1168,9 +1080,8 @@ io.on("connection", (socket) => {
       const userId = String(payload?.userId || "").trim();
       const email = String(payload?.email || "").trim();
       const avatarUrl = String(payload?.avatarUrl || "").trim();
-      const voiceChannel = normalizeVoiceChannel(
-        payload?.voiceChannel || "Lobby"
-      );
+      // Voice starts only after an explicit voice:join request.
+      const voiceChannel = null;
 
       const initial = String(
         payload?.initial || username.charAt(0) || "U"
@@ -1210,10 +1121,9 @@ io.on("connection", (socket) => {
         avatarUrl,
         initial,
         voiceChannel,
-        voiceChannel,
-        isSpeaking: Boolean(payload?.isSpeaking),
-        isMicOn: Boolean(payload?.isMicOn),
-        isDeafened: Boolean(payload?.isDeafened),
+        isSpeaking: false,
+        isMicOn: false,
+        isDeafened: false,
         joinedAt: Date.now(),
       });
 
@@ -1247,7 +1157,6 @@ io.on("connection", (socket) => {
       }
     }
   });
-
   /* =====================================================
     SECTION 6.1.1: Join Voice Channel
     Purpose:
@@ -1725,6 +1634,10 @@ io.on("connection", (socket) => {
           const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
           const preferredSlotId = String(payload?.slotId || "").trim();
 
+          if (gameId === "minesweeper" && !rooms.get(roomCode)?.users?.has(socket.id)) {
+            if (typeof callback === "function") callback({ ok: false, error: "Join the room first." });
+            return;
+          }
           const session = getOrCreateGameSession(roomCode, gameId);
 
           if (!session) {
@@ -1781,6 +1694,10 @@ io.on("connection", (socket) => {
 
           const gameId = String(payload?.gameId || socket.data.activeGameId || "").trim();
 
+          if (gameId === "minesweeper" && !rooms.get(roomCode)?.users?.has(socket.id)) {
+            if (typeof callback === "function") callback({ ok: false, error: "Join the room first." });
+            return;
+          }
           const session = getOrCreateGameSession(roomCode, gameId);
 
           if (!session) {
@@ -1901,6 +1818,8 @@ io.on("connection", (socket) => {
         }
       });
 
+      minesweeper.registerSocket({ socket, rooms, io, getGameSocketRoom, serializeGameSession });
+
       socket.on("game:state-sync", (payload, callback) => {
         try {
           const roomCode = String(
@@ -1935,6 +1854,10 @@ io.on("connection", (socket) => {
             return;
           }
 
+          if (gameId === "minesweeper") {
+            if (typeof callback === "function") callback({ ok: false, error: "Minesweeper accepts actions, not client board snapshots." });
+            return;
+          }
           const nextGameState = safeGameState(payload?.gameState);
 
           if (!nextGameState) {
@@ -2067,7 +1990,16 @@ io.on("connection", (socket) => {
             return;
           }
 
-          session.gameState = createInitialGameState(gameId);
+          if (gameId === "minesweeper") {
+            if (!room.users.has(socket.id)) {
+              if (typeof callback === "function") callback({ ok: false, error: "Join the room first." });
+              return;
+            }
+            session.minesweeper = minesweeper.createGame(session.minesweeper?.difficulty || "beginner");
+            session.gameState = minesweeper.publicState(session.minesweeper);
+          } else {
+            session.gameState = createInitialGameState(gameId);
+          }
           session.updatedAt = Date.now();
 
           io.to(getGameSocketRoom(roomCode, gameId)).emit("game:state-update", {
@@ -2280,7 +2212,6 @@ io.on("connection", (socket) => {
     console.log("Socket disconnected:", socket.id);
   });
 });
-
 
 /* =========================================================
    SECTION 7: Start Server

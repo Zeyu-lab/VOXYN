@@ -25,9 +25,6 @@ const resetLoading = ref(false)
 const errorMessage = ref("")
 const successMessage = ref("")
 
-const demoEmail = import.meta.env.VITE_DEMO_EMAIL || "demo@voxyn.local"
-const demoPassword = import.meta.env.VITE_DEMO_PASSWORD || "demo123456"
-
 /* =========================================================
    SECTION 3: Computed
 ========================================================= */
@@ -65,34 +62,28 @@ function normalizeEmail() {
 /* =========================================================
    SECTION 6: Login
    Purpose:
-   - Real Supabase email/password login
+   - Sign in through the shared player auth service
 ========================================================= */
 async function signIn() {
+  if (loading.value) return
   clearMessages()
-
   const cleanEmail = normalizeEmail()
-
   if (!cleanEmail || !password.value.trim()) {
     errorMessage.value = "Please enter both email and password."
     return
   }
-
   loading.value = true
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: cleanEmail,
-    password: password.value.trim()
-  })
-
-  loading.value = false
-
-  if (error) {
-    errorMessage.value = error.message
-    return
-  }
-
-  if (data.session) {
-    router.push("/dashboard")
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password: password.value
+    })
+    if (error) throw error
+    if (data.session) await router.push("/dashboard")
+  } catch (error) {
+    errorMessage.value = error.message || "Login failed."
+  } finally {
+    loading.value = false
   }
 }
 
@@ -128,34 +119,6 @@ async function sendResetLink() {
   successMessage.value = `Password reset link sent to ${cleanEmail}.`
 }
 
-/* =========================================================
-   SECTION 8: Demo Login
-   Purpose:
-   - Try logging in with demo account
-   - Demo account needs to exist in Supabase Auth
-========================================================= */
-async function demoLogin() {
-  clearMessages()
-
-  loading.value = true
-
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: demoEmail,
-    password: demoPassword
-  })
-
-  loading.value = false
-
-  if (error) {
-    errorMessage.value =
-      "Demo account is not ready yet. Create demo@voxyn.local in Supabase or set VITE_DEMO_EMAIL / VITE_DEMO_PASSWORD."
-    return
-  }
-
-  if (data.session) {
-    router.push("/dashboard")
-  }
-}
 </script>
 
 <template>
@@ -196,8 +159,8 @@ async function demoLogin() {
         </h1>
 
         <p class="intro-text">
-          Start with a demo account, create a room, share a code,
-          and continue building the full experience.
+          Log in to your account, create a room, share a code,
+          and connect with friends.
         </p>
 
         <div class="glass-orb">
@@ -285,20 +248,6 @@ async function demoLogin() {
             Create account
           </button>
 
-          <div class="divider">
-            <span></span>
-            <p>or</p>
-            <span></span>
-          </div>
-
-          <button
-            class="demo-button"
-            type="button"
-            @click="demoLogin"
-            :disabled="loading"
-          >
-            ▶ Demo login
-          </button>
         </form>
 
         <p v-if="errorMessage" class="error-message">
@@ -714,8 +663,7 @@ async function demoLogin() {
 }
 
 .primary-button,
-.secondary-button,
-.demo-button {
+.secondary-button {
   width: 100%;
   min-height: 56px;
 
@@ -738,45 +686,23 @@ async function demoLogin() {
   box-shadow: 0 18px 36px rgba(79, 70, 229, 0.24);
 }
 
-.secondary-button,
-.demo-button {
+.secondary-button {
   border: 1px solid rgba(148, 163, 184, 0.28);
   color: #0f172a;
   background: rgba(255, 255, 255, 0.82);
 }
 
 .primary-button:hover,
-.secondary-button:hover,
-.demo-button:hover {
+.secondary-button:hover {
   transform: translateY(-2px);
 }
 
 .primary-button:disabled,
-.secondary-button:disabled,
-.demo-button:disabled {
+.secondary-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
   transform: none;
   box-shadow: none;
-}
-
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.divider span {
-  height: 1px;
-  flex: 1;
-  background: rgba(148, 163, 184, 0.24);
-}
-
-.divider p {
-  margin: 0;
 }
 
 .error-message,

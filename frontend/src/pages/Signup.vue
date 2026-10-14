@@ -20,7 +20,6 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 const loading = ref(false)
-const betaLoading = ref(false)
 const resendLoading = ref(false)
 const verifyLoading = ref(false)
 
@@ -184,50 +183,7 @@ async function requestSignupCode() {
   }
 }
 
-/* =========================================================
-   SECTION 6.5: Beta Access Signup
-   Purpose:
-   - Temporary fallback for approved testers
-   - Does not send email OTP
-   - Backend checks Supabase beta_invites table
-   - Backend creates confirmed Supabase Auth account
-========================================================= */
-async function createBetaAccount() {
-  clearMessages()
 
-  if (!validateSignupForm()) return
-
-  betaLoading.value = true
-
-  try {
-    const response = await fetch(apiUrl("/api/auth/signup/beta-access"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        email: cleanEmail.value,
-        password: password.value,
-        username: defaultDisplayName.value
-      })
-    })
-
-    if (!response.ok) {
-      const message = await readApiMessage(response)
-      throw new Error(message)
-    }
-
-    successMessage.value = "Beta account created successfully. Redirecting to login..."
-
-    setTimeout(() => {
-      goLogin()
-    }, 900)
-  } catch (error) {
-    errorMessage.value = error.message || "Beta access signup failed."
-  } finally {
-    betaLoading.value = false
-  }
-}
 
 /* =========================================================
    SECTION 7: Verify Signup Code
@@ -352,6 +308,7 @@ async function resendVerificationCode() {
         <template v-if="signupStep === 'form'">
           <p class="card-kicker">CREATE ACCOUNT</p>
           <h1>Create your account</h1>
+
           <p class="card-description">
             Your email address will be used as your username to log in.
           </p>
@@ -359,6 +316,7 @@ async function resendVerificationCode() {
           <form class="auth-form" @submit.prevent="createAccount">
             <div class="input-group">
               <label>Email address username</label>
+
               <div class="input-shell">
                 <span class="input-icon">✉</span>
                 <input
@@ -372,6 +330,7 @@ async function resendVerificationCode() {
 
             <div class="input-group">
               <label>Password</label>
+
               <div class="input-shell">
                 <span class="input-icon">⌘</span>
                 <input
@@ -380,6 +339,7 @@ async function resendVerificationCode() {
                   placeholder="Enter your password"
                   autocomplete="new-password"
                 />
+
                 <button
                   type="button"
                   class="show-button"
@@ -392,6 +352,7 @@ async function resendVerificationCode() {
 
             <div class="input-group">
               <label>Enter password again</label>
+
               <div class="input-shell">
                 <span class="input-icon">⌘</span>
                 <input
@@ -400,6 +361,7 @@ async function resendVerificationCode() {
                   placeholder="Confirm your password"
                   autocomplete="new-password"
                 />
+
                 <button
                   type="button"
                   class="show-button"
@@ -411,103 +373,85 @@ async function resendVerificationCode() {
             </div>
 
             <button
-                class="primary-button"
-                type="submit"
-                :disabled="loading || betaLoading"
+              class="primary-button"
+              type="submit"
+              :disabled="loading"
             >
-                {{ loading ? "Sending verification code..." : "Create account" }}
+              {{ loading ? "Sending verification code..." : "Create account" }}
             </button>
 
-                <div class="beta-divider">
-                    <span></span>
-                    <p>For approved testers</p>
-                    <span></span>
-                </div>
-
             <button
-                class="beta-access-button"
-                type="button"
-                @click="createBetaAccount"
-                :disabled="loading || betaLoading"
+              class="secondary-button"
+              type="button"
+              @click="goLogin"
+              :disabled="loading"
             >
-                {{ betaLoading ? "Checking beta access..." : "Beta access without email code" }}
-            </button>
-
-                <p class="beta-note">
-                    Use normal signup for email verification. Use beta access only if your email is approved in Supabase.
-                </p>
-
-            <button
-                class="secondary-button"
-                type="button"
-                @click="goLogin"
-                :disabled="loading || betaLoading"
-            >
-                Back to login
+              Back to login
             </button>
           </form>
         </template>
 
         <template v-else>
-            <div class="verify-panel">
-                <div class="verify-icon">✉</div>
+          <div class="verify-panel">
+            <div class="verify-icon">✉</div>
 
-                <p class="card-kicker">VERIFY ACCOUNT</p>
-                <h1>Check your email</h1>
+            <p class="card-kicker">VERIFY ACCOUNT</p>
+            <h1>Check your email</h1>
 
-                <p class="card-description">
-                We sent a 6-digit verification code to
-                <strong>{{ cleanEmail }}</strong>.
-                Enter the code below to finish creating your VOXYN account.
-                </p>
+            <p class="card-description">
+              We sent a 6-digit verification code to
+              <strong>{{ cleanEmail }}</strong>.
+              Enter the code below to finish creating your VOXYN account.
+            </p>
 
-                <form class="auth-form" @submit.prevent="verifySignupCode">
-                <div class="input-group">
-                    <label>Verification code</label>
-                    <div class="input-shell">
-                    <span class="input-icon">#</span>
-                    <input
-                        v-model="verificationCode"
-                        type="text"
-                        maxlength="6"
-                        inputmode="numeric"
-                        placeholder="Enter 6-digit code"
-                        autocomplete="one-time-code"
-                    />
-                    </div>
+            <form class="auth-form" @submit.prevent="verifySignupCode">
+              <div class="input-group">
+                <label>Verification code</label>
+
+                <div class="input-shell">
+                  <span class="input-icon">#</span>
+                  <input
+                    v-model="verificationCode"
+                    type="text"
+                    maxlength="6"
+                    inputmode="numeric"
+                    placeholder="Enter 6-digit code"
+                    autocomplete="one-time-code"
+                  />
                 </div>
+              </div>
 
-                <button
-                    class="primary-button"
-                    type="submit"
-                    :disabled="verifyLoading"
-                >
-                    {{ verifyLoading ? "Verifying..." : "Verify and create account" }}
-                </button>
+              <button
+                class="primary-button"
+                type="submit"
+                :disabled="verifyLoading"
+              >
+                {{ verifyLoading ? "Verifying..." : "Verify and create account" }}
+              </button>
 
-                <button
-                    class="secondary-button"
-                    type="button"
-                    @click="resendVerificationCode"
-                    :disabled="resendLoading || verifyLoading"
-                >
-                    {{ resendLoading ? "Sending..." : "Resend code" }}
-                </button>
+              <button
+                class="secondary-button"
+                type="button"
+                @click="resendVerificationCode"
+                :disabled="resendLoading || verifyLoading"
+              >
+                {{ resendLoading ? "Sending..." : "Resend code" }}
+              </button>
 
-                <button
-                    class="text-button"
-                    type="button"
-                    @click="signupStep = 'form'"
-                    :disabled="verifyLoading"
-                >
-                    Back to edit email
-                </button>
-                </form>
+              <button
+                class="text-button"
+                type="button"
+                @click="signupStep = 'form'"
+                :disabled="verifyLoading"
+              >
+                Back to edit email
+              </button>
+            </form>
 
-                <p class="verify-hint">
-                The code expires in 5 minutes. Check your spam folder if you do not see it.
-                </p>
-            </div>
+            <p class="verify-hint">
+              The code expires in 5 minutes. Check your spam folder if you do not see it.
+            </p>
+          </div>
         </template>
 
         <p v-if="errorMessage" class="error-message">
@@ -519,7 +463,6 @@ async function resendVerificationCode() {
         </p>
       </section>
     </section>
-
     <!-- =========================================================
          SECTION 4: Slider Verification Modal
     ========================================================== -->
@@ -847,79 +790,6 @@ async function resendVerificationCode() {
   background: rgba(255, 255, 255, 0.82);
 }
 
-.beta-divider {
-  margin: 4px 0 -2px;
-
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 12px;
-}
-
-.beta-divider span {
-  height: 1px;
-  background: rgba(148, 163, 184, 0.26);
-}
-
-.beta-divider p {
-  margin: 0;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 850;
-}
-
-.beta-access-button {
-  width: 100%;
-  min-height: 56px;
-
-  border: 1px solid rgba(79, 70, 229, 0.42);
-  border-radius: 16px;
-
-  color: #4f46e5;
-  background:
-    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(79, 70, 229, 0.04)),
-    rgba(255, 255, 255, 0.86);
-
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 950;
-
-  transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease,
-    background 0.18s ease,
-    opacity 0.18s ease;
-}
-
-.beta-access-button:hover {
-  transform: translateY(-2px);
-  background:
-    linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(79, 70, 229, 0.07)),
-    rgba(255, 255, 255, 0.92);
-  box-shadow: 0 14px 28px rgba(79, 70, 229, 0.12);
-}
-
-.beta-access-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-  transform: none;
-  box-shadow: none;
-}
-
-.beta-note {
-  margin: -4px 0 0;
-  padding: 12px 13px;
-
-  border: 1px solid rgba(99, 102, 241, 0.14);
-  border-radius: 14px;
-
-  color: #64748b;
-  background: rgba(99, 102, 241, 0.06);
-
-  font-size: 12px;
-  line-height: 1.45;
-  font-weight: 750;
-}
 
 .primary-button:hover,
 .secondary-button:hover {

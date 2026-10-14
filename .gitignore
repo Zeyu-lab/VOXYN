@@ -1,3 +1,5 @@
 .env
 frontend/.env
 frontend/.env
+/backend/local-admin.json*
+/backend/.voxyn-local/

@@ -390,3 +390,92 @@ Final v1.0 Summary
 - The project has moved beyond a simple website and now demonstrates authentication, real-time rooms, WebRTC voice, game launching, profile flow, and polished UI direction.
 - Current priority shifts from adding new features to stabilizing, testing, documenting, and preparing the project for portfolio/resume use.
 - Future development will continue from this stable base instead of endlessly expanding the v1.0 scope.
+
+
+v1.1 Update
+Development period: October 13-14, 2026
+
+- Consolidated the October 13 stabilization work and October 14 game work into VOXYN v1.1.
+- Earlier references to v1.01 during this work are now included in the v1.1 milestone.
+- Continued development from the existing v1.0 product instead of replacing the platform structure.
+
+Authentication / Room Stability
+-
+- Stabilized the login, create-room, and join-room flows for local test accounts and normal email-based accounts.
+- Fixed the room-creation and room-entry issues encountered when testing admin and regular accounts.
+- Established the repaired login / create / join flow as the working checkpoint before continuing game development.
+- Continued using the existing room-service, Socket.IO, and local test-account structure.
+
+Game Library
+-
+- Reduced the visible catalog to four games: Tic Tac Toe, Falling Blocks, 2048, and Minesweeper.
+- Removed Game 5-8 preview entries: Blackjack, Chess, Word Battle, and Party Quiz.
+- Updated the shared catalog used by both desktop cards and the compact game list.
+- Changed Minesweeper from a Preview entry to a registered playable game module.
+- Kept the white Apple-style / liquid-glass visual direction.
+
+Minesweeper Gameplay
+-
+- Added a dedicated frontend Minesweeper.vue component.
+- Added three difficulty levels:
+  Beginner: 9 x 9, 10 mines.
+  Intermediate: 16 x 16, 40 mines.
+  Expert: 16 x 30, 99 mines.
+- Added reveal, flag / unflag, blank-area expansion, win / loss detection, and restart behavior.
+- Generate the minefield after the first reveal, keeping the selected square and its neighboring squares safe.
+- Added a timer that starts on the first reveal and stops when the round ends.
+- Added remaining-mine and revealed-safe-square counters.
+- Added number-cell expansion when adjacent flag count matches the number; incorrect flags can still trigger a mine.
+- Added right-click flagging, keyboard F flagging, and a Flag mode for touch input.
+- Added arrow-key focus movement and a horizontally scrollable board for narrow screens.
+- Changing difficulty starts a fresh round shared with the current spectators.
+
+Minesweeper Backend / Live Sessions
+-
+- Added backend/minesweeper.js as a separate rules module using Node's built-in crypto module.
+- Registered Minesweeper in the existing backend game configuration and frontend GameStage registries.
+- Connected the game to the existing Socket.IO room / session infrastructure.
+- Added the game:minesweeper-action event for player actions.
+- Made the backend responsible for mine placement, board updates, and win / loss decisions.
+- Kept hidden mine positions and unopened-cell numbers out of client snapshots during active play.
+- Added room-membership, player-slot, round-ID, and revision checks before applying actions.
+- Rejected client-submitted Minesweeper board snapshots through the generic game:state-sync endpoint.
+- Added one active player slot per room; additional users join as spectators.
+- Added live board synchronization and current-state snapshots for users who join later.
+- Locked reveal, flag, restart, and difficulty controls for spectators.
+- Added player-slot release when returning to Game Library and Take player seat for waiting spectators.
+- Added a Rejoin game action to recover the current session after reconnection.
+- Adjusted the Minesweeper Rooms display to show a solo player rather than a two-player matchup.
+- Kept game sessions in the existing in-memory store; backend restarts still clear sessions.
+
+Integration / Validation
+-
+- Prepared updated GameStage.vue, GameLibrary.vue, and server.js, plus the new Minesweeper.vue and backend/minesweeper.js.
+- Added a reusable Minesweeper rules test file and installation / local acceptance notes.
+- Passed 12 rule-test groups, including first-click safety across 90 random boards, neighbor counts, flags, expansion, win / loss, timer, restart, and invalid actions.
+- Passed one actual Socket.IO integration-test group covering roles, broadcasts, late joins, reset, room isolation, reconnect, and player-slot handover.
+- Checked that the existing 2048 state-sync endpoint still accepts its normal game updates.
+- Passed script, template, and CSS compilation checks for Minesweeper.vue, GameStage.vue, and GameLibrary.vue.
+- Passed Node syntax checks for the backend files.
+- Fixed the local backend filename casing mismatch: use minesweeper.js with require("./minesweeper").
+- Frontend component naming remains Minesweeper.vue.
+- Full browser, local-project, and real-device acceptance remains a separate verification step; automated checks are not a claim that every product flow has been tested end-to-end.
+
+Voice Review / Remaining Issue
+-
+- Reviewed the current useVoiceRoom.js and voiceConfig.js while investigating delayed speech and electronic / distorted audio.
+- Confirmed that the supplied ICE configuration currently contains a Google STUN entry and no TURN fallback.
+- Identified immediate connection cleanup on the temporary disconnected state as a stability issue.
+- Provided a targeted change that allows a temporarily disconnected peer connection to recover before treating it as failed.
+- Applying and validating that voice change still needs confirmation; it is not included in the Minesweeper package.
+- Voice latency and electronic noise remain open issues. No successful audio-quality fix has been confirmed yet.
+- Next voice test should identify the device / browser setup, headphones versus speakers, one-way versus two-way noise, and approximate delay.
+
+Next Checkpoint
+-
+- Build the updated frontend, restart the backend, and verify the four-game library in the local project.
+- Test Minesweeper gameplay, difficulty changes, restart, and end states in the browser.
+- Use a second account / browser session or device to verify live spectating and player-slot handover.
+- Recheck the original games, room chat, and voice after integration.
+- Continue investigating the WebRTC audio latency / distortion issue after the game checkpoint is accepted.
+- MySQL migration, Docker deployment, and the later architecture plans remain future milestones.
