@@ -13,7 +13,7 @@ const nodemailer = require("nodemailer");
 const { createClient } = require("@supabase/supabase-js");
 const { Server } = require("socket.io");
 const fs = require("fs");
-const minesweeper = require("./Minesweeper-temp");
+const minesweeper = require("./Minesweeper");
 
 require("dotenv").config();
 
